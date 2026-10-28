@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Claude Switch Studio — shared conversations, independent identities</title>
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="#172238"/>
+  <path d="M128 104 H296 Q336 104 336 144 V238 Q336 278 296 278 H176 L128 318 V278 Q88 278 88 238 V144 Q88 104 128 104 Z" fill="#5699FF"/>
+  <path d="M240 224 H384 Q424 224 424 264 V358 Q424 398 384 398 H366 V438 L316 398 H240 Q200 398 200 358 V264 Q200 224 240 224 Z" fill="#37D4C2" stroke="#172238" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M142 180 H274 M254 160 L274 180 L254 200" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M368 310 H256 M276 290 L256 310 L276 330" fill="none" stroke="#14253A" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

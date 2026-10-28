@@ -1,0 +1,19 @@
+﻿Claude Switch Studio 安装说明
+
+这是独立开发的本地管理工具，并非 Anthropic 官方产品。
+
+安装只写入程序目录、桌面/开始菜单快捷方式及本程序的卸载信息。安装过程中不会登录、切换或关闭 Claude，不会迁移本机对话、记忆或登录快照。安装前无需退出 Claude；如果本工具自身正在运行，请先关闭本工具窗口。
+
+默认安装位置为 D:\programfile\Claude Switch Studio，可在下一步更改。如果电脑没有 D 盘，默认使用当前用户的本地程序目录。程序包含所需的 Python 运行环境，无需另行安装 Python 或修改系统 PATH。
+
+卸载仅移除安装器登记的程序文件和快捷方式。程序运行后创建的 data 数据、备份，以及 Claude 自己的对话、记忆和登录文件不会被清理。升级也不会自动执行账号切换或数据迁移。
+
+登录快照属于实验功能，未经 Claude 官方支持。检查本地文件不代表登录有效，也不能保证账号使用没有风险。实际收录登录、切换账号或提供商时，程序会提醒你先退出 Claude，并在操作前创建带时间戳的备份。
+
+本安装包尚未购买代码签名证书。请只使用你信任来源提供、校验值一致的版本。
+
+English
+
+This is an independent, unofficial local utility. Setup does not launch, sign in to, switch, close, or migrate Claude. Close this utility itself before upgrading it. The bundled Python runtime does not change your system Python or PATH.
+
+Uninstall removes installed application files and shortcuts. User-created application data, backups, Claude conversations, memories, and login profiles are retained. Login snapshots are experimental and are not endorsed by the service provider.

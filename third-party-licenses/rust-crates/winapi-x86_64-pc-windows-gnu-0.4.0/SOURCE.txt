@@ -1,0 +1,1 @@
+The import-library crate is from retep998/winapi-rs and declares MIT/Apache-2.0. Its package omits the license files; these unmodified files are from winapi 0.3.9 in the same upstream repository.
