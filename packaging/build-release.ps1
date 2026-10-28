@@ -32,8 +32,8 @@ foreach($directory in @('assets','docs','third-party-licenses')){Copy-Item -Lite
 Copy-Item -LiteralPath (Join-Path $launcherBin 'ClaudeSwitchStudio.exe') -Destination $payload
 [void][IO.Directory]::CreateDirectory((Join-Path $payload 'runtime'))
 Copy-Item -LiteralPath $runtime -Destination (Join-Path $payload 'runtime\python') -Recurse
-& (Join-Path $payload 'ClaudeSwitchStudio.exe') --self-check
-if($LASTEXITCODE){throw 'Launcher dependency check failed.'}
+$launcherCheck=Start-Process -FilePath (Join-Path $payload 'ClaudeSwitchStudio.exe') -ArgumentList '--self-check' -Wait -PassThru -WindowStyle Hidden
+if($launcherCheck.ExitCode){throw 'Launcher dependency check failed.'}
 & (Join-Path $payload 'runtime\python\python.exe') -c 'import sqlite3,ssl,hashlib,uuid,msvcrt; assert sqlite3.sqlite_version; print(ssl.OPENSSL_VERSION)'
 if($LASTEXITCODE){throw 'Embedded runtime verification failed.'}
 & (Join-Path $root 'installer\build-installer.ps1') -Compiler $Compiler -PayloadDir $payload -OutputDir $OutputDir -ChineseLanguageFile (Join-Path $root 'installer\ChineseSimplified.isl') -Version '0.3.1'
