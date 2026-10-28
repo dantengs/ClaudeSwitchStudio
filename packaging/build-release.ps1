@@ -27,7 +27,7 @@ if($LASTEXITCODE){throw 'Offline manual rendering failed.'}
 $payload=Join-Path $PSScriptRoot 'payload'
 if(Test-Path -LiteralPath $payload){throw 'Payload already exists. Preserve it and choose a fresh build checkout rather than recursively deleting it.'}
 [void][IO.Directory]::CreateDirectory($payload)
-foreach($name in @('Studio.ps1','Studio.xaml','studio-core.ps1','studio-worker.ps1','local_adapter.py','claude-switch-core.exe','README.md','LICENSE','UPSTREAM-LICENSE','THIRD_PARTY_NOTICES.md')){Copy-Item -LiteralPath (Join-Path $root $name) -Destination $payload}
+foreach($name in @('Studio.ps1','Studio.xaml','studio-core.ps1','studio-worker.ps1','local_adapter.py','claude-switch-core.exe','README.md','README.zh-CN.md','CONTRIBUTORS.md','AGENTS.md','LICENSE','UPSTREAM-LICENSE','THIRD_PARTY_NOTICES.md')){Copy-Item -LiteralPath (Join-Path $root $name) -Destination $payload}
 foreach($directory in @('assets','docs','third-party-licenses')){Copy-Item -LiteralPath (Join-Path $root $directory) -Destination $payload -Recurse}
 Copy-Item -LiteralPath (Join-Path $launcherBin 'ClaudeSwitchStudio.exe') -Destination $payload
 [void][IO.Directory]::CreateDirectory((Join-Path $payload 'runtime'))

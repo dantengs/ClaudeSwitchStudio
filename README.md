@@ -1,76 +1,87 @@
 <p align="center"><img src="assets/app.png" width="104" alt="Claude Switch Studio icon"></p>
 <h1 align="center">Claude Switch Studio</h1>
-<p align="center">Windows 本地账号、提供商、对话与备份管理工具</p>
+<p align="center">A local Windows workspace for accounts, providers, conversations, and backups</p>
 
-**独立开发、非 Anthropic 官方产品。** 当前版本面向 Windows 10/11 x64，使用 Rust 数据核心、Python 本地适配器和 WPF 界面。
+**[English](README.md)** | [简体中文](README.zh-CN.md)
 
-## 下载与安装
+**An independent project, not an official Anthropic product.** The current release targets Windows 10/11 x64 and combines a Rust data core, a local Python adapter, and a WPF interface.
 
-从 [Releases](https://github.com/dantengs/ClaudeSwitchStudio/releases) 下载 `ClaudeSwitchStudio-0.3.1-Setup.exe`，按安装向导操作。默认安装到 `D:\programfile\Claude Switch Studio`，也可以选择其他目录。没有 D 盘时使用当前用户的程序目录。
+## Download and install
 
-安装后打开桌面或开始菜单中的 **Claude Switch Studio**。安装包含独立 EXE 入口、自有图标和所需 Python 运行时，无需修改系统 PATH。首次启动提供三步新手指引，设置页可以重新查看。
+Download `ClaudeSwitchStudio-0.3.1-Setup.exe` from [Releases](https://github.com/dantengs/ClaudeSwitchStudio/releases) and follow the installer. The default location is `D:\programfile\Claude Switch Studio`; you can choose another directory. If drive D is unavailable, setup uses the current user's programs directory.
 
-安装包目前未签名。请使用本仓库发布页的安装包，并与随附 `.sha256` 核对。安装器不会关闭或操作 Claude。升级前请关闭本工具窗口。
+Open **Claude Switch Studio** from the desktop or Start menu. The installation includes an EXE launcher, original application icons, and the required Python runtime, without changing the system PATH. A three-step guide appears on first launch and can be reopened in Settings.
 
-## 能做什么
+The installer is currently unsigned. Download it from this repository's release page and verify the accompanying `.sha256` file. Setup does not close or operate Claude. Close this utility before upgrading it.
 
-- 识别本机 Claude Desktop 历史账号，展示有来源的邮箱对应关系和已收录状态。
-- 收录、更新及恢复官方桌面版的本地登录快照；操作前提示退出 Claude，创建时间戳备份。
-- 从已安装的 CC Switch 配置只读识别第三方提供商，并管理本机第三方模式；不会捆绑 CC Switch。
-- 汇总官方版、第三方版的本地会话索引，按原文身份去重，提供搜索与历史用量查看。
-- 查看本地项目记忆，备份会话原文、索引与相关状态。
-- 深浅主题、可调字号、统一矢量侧栏图标、首次启动指引。
+## Features
 
-## 重要边界
+- Discover historical Claude Desktop accounts on the local machine, with sourced email mappings and capture status.
+- Capture, update, and restore experimental local login snapshots for the official desktop client, with an exit reminder and timestamped backup before changes.
+- Read provider entries from an existing CC Switch installation and manage local third-party mode. CC Switch itself is not bundled.
+- Combine local conversation indexes from official and third-party installations, deduplicate by transcript identity, and provide search and historical usage views.
+- Show local project memory locations and back up transcripts, indexes, and related state.
+- Light and dark themes, adjustable text size, consistent vector sidebar icons, and first-run guidance.
 
-**登录快照是实验功能，不是官方授权接口。** 工具只检查本地文件和缓存，不能保证登录有效或没有账号风险。Anthropic 的规则限制第三方应用提供 Claude.ai 登录、收集或保存会话令牌及代用户转发订阅请求；本地备份并不等于获得官方许可。请阅读 [官方凭证使用说明](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)，自行评估是否启用。
+## Important limitations
 
-本项目没有自建 Claude OAuth 登录，不解密或上传官方订阅令牌，不通过第三方端点转发官方订阅请求。用户自行在官方客户端登录、检查登录有效性。Claude Code 登录与 Claude Desktop 登录分别管理，不能互相替代。
+**Login snapshots are experimental, not an official authorization interface.** This utility checks local files and caches; it cannot guarantee a valid login or freedom from account restrictions. Anthropic's rules restrict third-party applications from offering Claude.ai login, collecting or storing session tokens, and routing subscription requests on users' behalf. A local backup does not establish official permission. Read the [official credential-use guidance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) before deciding whether to enable this feature.
 
-“共享对话池”是对本机原文和索引的统一、去重视图。**没有自动创建账号目录联接或自动迁移全部索引**，也不会让每个账号的 Claude 原生侧栏自动完全相同。恢复对话的实际行为仍需官方客户端确认。共享本地文件不能继承服务端提示词缓存，历史用量不代表下一次请求的费用或缓存命中率。
+The project does not implement its own Claude OAuth login, decrypt or upload official subscription tokens, or forward official subscription requests through third-party endpoints. Users sign in and verify the result in the official client themselves. Claude Code and Claude Desktop logins are managed separately and cannot substitute for each other.
 
-## 开始使用
+The “shared conversation pool” is a combined, deduplicated view of local transcripts and indexes. **It does not automatically create account-directory junctions or migrate every index**, and it does not make every account's native Claude sidebar identical. Actual conversation resumption must still be checked in the official client. Sharing local files cannot inherit server-side prompt caches; historical usage does not predict the next request's cost or cache hit rate.
 
-1. 先只读查看账号和共享池；历史账号记录不等于已保存登录。
-2. 如决定使用实验性快照，在官方 **Claude Desktop** 登录当前账号，完成工作并完全退出 Desktop、Claude Code 和第三方版。
-3. 点击“收录当前登录”，确认身份与显示名称。目录使用内部 UUID，完整邮箱可以用作显示名称。
-4. 添加其他账号时，先保留当前快照，再自行通过官方客户端登录其他账号；退出后回来收录。
-5. 有快照的目标账号显示“切换账号”。切换前再次退出 Claude；工具保留当前账号的最新状态，再恢复目标快照。
-6. 自行重新打开 Claude 验证登录。官方登出、令牌撤销、过期或客户端更新都可能使旧快照失效，需要重新登录。
+## Getting started
 
-完整步骤、第三方配置、备份恢复和常见问题见 [使用手册](docs/USER_GUIDE.md)。
+1. Browse accounts and the shared pool in read-only mode first. A historical account entry is not a saved login.
+2. If you choose to use experimental snapshots, sign in to the official **Claude Desktop** client, finish your work, and fully quit Desktop, Claude Code, and the third-party edition.
+3. Click “Capture current login” (收录当前登录), then check the identity and display name. Storage directories use internal UUIDs; a full email address can be a display name.
+4. Before adding another account, preserve the current snapshot. Sign in to the other account through the official client yourself, quit it, and return to capture that login.
+5. A target account with a snapshot offers “Switch account” (切换账号). Quit Claude before switching; the utility preserves the current account's latest state before restoring the target snapshot.
+6. Reopen Claude yourself and verify the login. Official logout, token revocation, expiry, or client updates may invalidate a previous snapshot and require a new sign-in.
 
-## 数据与隐私
+See the [user guide (Chinese)](docs/USER_GUIDE.md) for detailed steps, provider configuration, backups, recovery, and troubleshooting.
 
-程序自己的偏好、请求记录和备份保存在安装目录的 `data/`；桌面版登录快照保存在当前 Windows 用户的 `.claude-profiles/`。认证备份包含敏感文件，限制访问权限并与普通会话备份分开。**不要上传运行数据或认证备份。** 卸载不会删除运行后产生的 `data/` 或 Claude 自己的数据；公开源码及安装包不包含任何用户账号、对话或快照。
+## Data and privacy
 
-需要网络的操作包括用户选择的提供商推理以及通过官方客户端登录。基础本地浏览和文件管理不需要工具自己的云端服务。对于有模型映射的第三方提供商，工具会使用只监听回环地址的本地转发器；其凭证与官方订阅登录分离。
+The utility stores its preferences, request records, and backups in the installation's `data/` directory. Desktop login snapshots are stored in the current Windows user's `.claude-profiles/` directory. Authentication backups contain sensitive files, have restricted access, and are separate from ordinary conversation backups. **Do not upload runtime data or authentication backups.** Uninstall preserves data created after installation and Claude's own files. Public source and installer payloads exclude personal accounts, conversations, and login snapshots.
 
-## 开发与构建
+Network activity includes inference through the provider you choose and sign-in through the official client. Basic local browsing and file management do not require a cloud service operated by this utility. Providers that need model mapping use a local relay that listens only on the loopback interface; their credentials are separate from official subscription logins.
 
-后续智能体请先阅读 [开发交接文档](docs/AGENT_HANDOFF.md) 和 [AGENTS.md](AGENTS.md)，其中记录已验证范围、真实数据边界、关键实现与接手步骤。
+## Development and builds
 
-源码入口：
+Agents taking over development should start with the [agent handoff (Chinese)](docs/AGENT_HANDOFF.md) and [AGENTS.md](AGENTS.md). They describe verified scope, real-data boundaries, implementation details, and the handoff process.
 
-| 部分 | 路径 | 职责 |
+Source layout:
+
+| Component | Path | Responsibility |
 | --- | --- | --- |
-| Rust 核心 | `rust-core/` | 扫描、去重、用量、备份、受保护的操作分发 |
-| 本地适配器 | `local_adapter.py` | 快照、事务记录、第三方配置与可选本地转发 |
-| WPF 界面 | `Studio.ps1` / `Studio.xaml` | 账号卡片、共享池、引导与设置 |
-| EXE 入口 | `launcher/` | 隐藏控制台启动界面、实例锁和文件自检 |
-| 安装器 | `installer/` | 中文/英文安装、快捷方式、保留数据的卸载 |
-| 图标源文件 | `assets/app.svg` | 原创矢量图标，附 PNG 和多尺寸 ICO |
+| Rust core | `rust-core/` | Scanning, deduplication, usage, backups, and guarded operation dispatch |
+| Local adapter | `local_adapter.py` | Snapshots, transaction records, provider configuration, and optional local relay |
+| WPF interface | `Studio.ps1` / `Studio.xaml` | Account cards, shared pool, guidance, and settings |
+| EXE launcher | `launcher/` | Launching the interface without a console, instance lock, and file self-check |
+| Installer | `installer/` | Chinese/English setup, shortcuts, and uninstall that preserves user data |
+| Icon source | `assets/app.svg` | Original vector artwork, with PNG and multi-size ICO exports |
 
-构建依赖：Windows 自带 PowerShell 5.1、.NET Framework C# 编译器，Rust GNU 工具链，以及 Inno Setup 6.7.3。运行版 Python 3.14.10 从 Python 官网下载，构建脚本核对固定 SHA-256，不使用开发者个人 Python 打包。
+Build requirements are Windows PowerShell 5.1, the .NET Framework C# compiler, a Rust GNU toolchain, and Inno Setup 6.7.3. The build downloads Python 3.14.10 from Python's official site and verifies its pinned SHA-256; it does not package the developer's personal Python installation.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File packaging\build-release.ps1
 ```
 
-构建配置与验收方式见 [构建和架构说明](docs/DEVELOPMENT.md)。
+See [development and verification notes (Chinese)](docs/DEVELOPMENT.md) for build configuration. The [documentation coordination guide](docs/DOCUMENTATION.md) describes how to maintain the English/Chinese homepages and public/local documentation. Machine-specific coordination records stay in the excluded `local-notes/` directory and are not published with source or installers.
 
-## 许可与致谢
+## License and acknowledgements
 
-本项目新增代码采用 [MIT](LICENSE)。历史原型的许可保存在 [UPSTREAM-LICENSE](UPSTREAM-LICENSE)。已复用的来源、纯设计参考、Rust 依赖、Python 与打包工具分别列在 [第三方声明](THIRD_PARTY_NOTICES.md) 和 [开源审计说明](docs/OPEN_SOURCE_AUDIT.md)。第三方组件保持各自许可，不因本项目使用 MIT 而改变。
+New project code is licensed under [MIT](LICENSE). The historical prototype's license is retained in [UPSTREAM-LICENSE](UPSTREAM-LICENSE). Reused sources, design references, Rust dependencies, Python, and packaging tools are distinguished in [third-party notices](THIRD_PARTY_NOTICES.md) and the [open-source audit (Chinese)](docs/OPEN_SOURCE_AUDIT.md). Third-party components retain their own licenses; this project's MIT license does not replace them.
 
-不附带 Claude、CC Switch 或其他参考项目的商标和官方图标；品牌名称仅用于描述兼容对象，不表示得到官方认可或合作授权。
+Official icons and logos from Claude, CC Switch, or other referenced projects are not bundled. Brand names describe compatibility and do not imply endorsement, partnership, or authorization.
+
+## Contributors and AI collaboration
+
+| Collaborator | Acknowledgement |
+| --- | --- |
+| GPT (OpenAI) | AI-assisted development collaborator |
+| Claude (Anthropic) | AI-assisted development collaborator |
+
+These AI acknowledgements are included at the maintainer's request; they do not independently attribute every code fragment to a particular model. The human maintainer is responsible for review, testing, merging, and release decisions. No fictitious GitHub accounts or email addresses are created for AI contributors, and these credits do not imply endorsement by OpenAI or Anthropic. See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the full acknowledgement.

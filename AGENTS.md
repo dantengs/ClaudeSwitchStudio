@@ -2,6 +2,8 @@
 
 开始接手前，先读 [开发交接](docs/AGENT_HANDOFF.md)，再按任务查看 [架构与构建](docs/DEVELOPMENT.md)、[使用手册](docs/USER_GUIDE.md) 和 [许可审计](docs/OPEN_SOURCE_AUDIT.md)。
 
+文档与发布协调见 [DOCUMENTATION.md](docs/DOCUMENTATION.md)。若本机存在未公开的 `local-notes/COORDINATION.md`，接手前一并阅读；不把它复制到公开仓库或载荷。默认英文主页和中文主页需要保持对应，AI 协作署名以 [CONTRIBUTORS.md](CONTRIBUTORS.md) 为准。
+
 ## 工作边界
 
 - 这是 Windows 本地工具，当前由 C# EXE 入口、PowerShell 5.1/WPF 界面、Rust 数据核心和 Python 适配器组成；不是已完成的纯 Rust GUI。
