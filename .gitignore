@@ -25,3 +25,4 @@ install-backups/
 acceptance/
 acceptance-*.json
 installation-*.json
+local-notes/
