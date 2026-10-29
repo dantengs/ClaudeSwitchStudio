@@ -12,7 +12,7 @@
 
 Download an installer from [Releases](https://github.com/dantengs/ClaudeSwitchStudio/releases) and follow the setup wizard:
 
-- **0.4.0-preview (pre-release)**: `ClaudeSwitchStudio-0.4.0-preview-Setup.exe`, with the unified account page, third-party accounts and access table, multiple Codex accounts, usage statistics, MCP and skill toggles, WebDAV cloud backup, and more. It is a preview: the new features have only been verified in test environments, so read the [release notes (Chinese)](RELEASE_NOTES.md) first.
+- **0.4.3-preview (pre-release)**: `ClaudeSwitchStudio-0.4.3-preview-Setup.exe`, with the unified account page, third-party accounts and access table, multiple Codex accounts, usage statistics, MCP and skill toggles, WebDAV cloud backup, and conversation titles, working folders and sidebar folders unified across accounts. It is a preview, so read the [release notes (Chinese)](RELEASE_NOTES.md) first.
 - **0.3.1 (stable)**: `ClaudeSwitchStudio-0.3.1-Setup.exe`.
 
  The default location is `D:\programfile\Claude Switch Studio`; you can choose another directory. If drive D is unavailable, setup uses the current user's programs directory.
