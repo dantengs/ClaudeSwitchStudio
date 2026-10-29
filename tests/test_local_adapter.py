@@ -260,7 +260,10 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual((result['Created'], result['Updated']), (1, 2))
         journal = adapter.read(result['Journal'])
         self.assertEqual(journal['Status'], 'committed')
-        self.assertEqual(adapter.read(next(e['Backup'] for e in journal['Updated'] if e['Path'] == str(own_y)))['title'], '1000')
+        # Verified, so this sync's own backup folder is gone; nothing else under the data folder is touched.
+        self.assertTrue(journal['Verified'] and journal['BackupRemoved'])
+        self.assertFalse(Path(journal['Updated'][0]['Backup']).exists())
+        self.assertEqual(list((self.data / 'conversation-sync-originals').iterdir()), [])
         again = adapter.sync_conversations(self.data, self.root)
         self.assertEqual((again['Created'], again['Updated']), (0, 0))
         self.assertNotIn('Journal', again)
@@ -283,58 +286,222 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual((value['title'], value['previousTitles'], value['cwd'], value['originCwd']), ('new', ['old'], 'C:\\B', 'C:\\B'))
         self.assertIn('统一了 2 个对话条目', result['Message'])
 
-    def ldb_store(self, folder, account, scope, values):
+    def ldb_store(self, folder, account, scope, values, state=None):
         """A minimal LevelDB store as Chromium leaves it: manifest, empty log, then one appended batch."""
         folder.mkdir(parents=True)
         edit = b'\x01' + adapter.put_varint(26) + b'leveldb.BytewiseComparator' + b'\x02\x03\x03\x04\x04\x00'
         (folder / 'MANIFEST-000001').write_bytes(adapter.masked_crc(b'\x01' + edit).to_bytes(4, 'little') + len(edit).to_bytes(2, 'little') + b'\x01' + edit)
         (folder / 'CURRENT').write_text('MANIFEST-000001\n', encoding='ascii')
         (folder / '000003.log').write_bytes(b'')
-        frame = {'state': {'lastSidebarScopeKey': scope}, 'version': 1}
-        items = [(adapter.ls_key('dframe-store'), adapter.ls_value(json.dumps(frame)))]
+        frame = {'state': dict(state or {}, lastSidebarScopeKey=scope), 'version': 1, 'shared': 1}
+        items = [(adapter.ls_key('dframe-store'), adapter.ls_value(json.dumps(frame, ensure_ascii=False)))]
         items += [(adapter.ls_key(k), adapter.ls_value(json.dumps(v, ensure_ascii=False))) for k, v in values.items()]
         adapter.ldb_put(folder, items, 0)
         adapter.atomic_json(folder.parent.parent / 'config.json', {'lastKnownAccountUuid': account})
+
+    def desktop_folders(self, folder, account, scope, groups, sections, moment):
+        """Desktop's layout: folders in the dframe-store state, mirrored to LSS keys with their change time."""
+        mirrors = {adapter.SIDEBAR_KEYS[0]: {'value': groups, 'tabId': 't', 'timestamp': moment},
+                   adapter.SIDEBAR_KEYS[1]: {'value': sections, 'tabId': 't', 'timestamp': moment}}
+        self.ldb_store(folder, account, scope, mirrors, {'customGroupsByScope': groups, 'codeSidebarByScope': sections,
+                                                         'interfaceFont': '思源黑体', 'collapsedGroups': ['project-C:\\p']})
+
+    def frame(self, folder):
+        return json.loads(adapter.ls_text(adapter.ldb_state(folder)[0][adapter.ls_key('dframe-store')]))
+
+    def mirror(self, folder, index):
+        return json.loads(adapter.ls_text(adapter.ldb_state(folder)[0][adapter.ls_key(adapter.SIDEBAR_KEYS[index])]))
+
+    def rewrite_frame(self, folder, change, moment):
+        """What Desktop does when folders change: update the state and rebuild both mirrors."""
+        values, last = adapter.ldb_state(folder)
+        frame = self.frame(folder)
+        frame['state'].update(change)
+        items = [(adapter.ls_key('dframe-store'), adapter.ls_value(json.dumps(frame, ensure_ascii=False)))]
+        for index, (field, _) in enumerate(adapter.SIDEBAR_FIELDS):
+            items.append((adapter.ls_key(adapter.SIDEBAR_KEYS[index]), adapter.ls_value(json.dumps(
+                {'value': frame['state'][field], 'tabId': 't', 'timestamp': moment}, ensure_ascii=False))))
+        adapter.ldb_put(folder, items, last)
 
     def test_sidebar_folders_follow_the_account_edited_last(self):
         org_a, org_b = 'aaaaaaaa-0000-4000-8000-000000000001', 'bbbbbbbb-0000-4000-8000-000000000002'
         scope_a, scope_b = f'{self.A_ID}/{org_a}', f'{self.B_ID}/{org_b}'
         sid = '40000000-0000-4000-8000-000000000001'
+        mine, other = f'code:local_{sid}', 'code:local_50000000-0000-4000-8000-000000000001'
         (self.user / '.claude/projects/p').mkdir(parents=True)
-        (self.user / '.claude/projects/p/cli-f.jsonl').write_text('{}', encoding='utf-8')
-        self.session(self.A_ID, org_a, sid, 'cli-f')
-        self.session(self.B_ID, org_b, sid, 'cli-f')
-        other = 'code:local_50000000-0000-4000-8000-000000000001'
+        (self.user / '.claude/projects/p/cli-f.jsonl').write_text('{"fixture": "transcript"}', encoding='utf-8')
+        self.session(self.A_ID, org_a, sid, 'cli-f', title='same', cwd='C:\\p')
+        self.session(self.B_ID, org_b, sid, 'cli-f', title='same', cwd='C:\\p')
+        empty = {'groups': [], 'assignments': {}, 'order': {}}
+        groups_a = {'groups': [{'id': 'cg-a', 'name': 'A folder'}], 'assignments': {mine: 'cg-a', other: 'cg-a'}, 'order': {'cg-a': [mine, other]}}
+        groups_b = {'groups': [{'id': 'cg-1', 'name': '研究'}], 'assignments': {mine: 'cg-1'}, 'order': {'cg-1': [mine]}}
         plain = {'sections': [{'id': 'sessions', 'kind': 'sessions'}], 'prefsSeeded': True}
-        in_a = {'sections': [{'id': 'cg-a', 'kind': 'manual', 'name': 'A folder', 'members': [f'code:local_{sid}', other]},
-                             {'id': 'sessions', 'kind': 'sessions'}], 'prefsSeeded': True}
-        moved = {'sections': [{'id': 'cg-1', 'kind': 'manual', 'name': '研究', 'members': [f'code:local_{sid}']},
-                              {'id': 'sessions', 'kind': 'sessions'}], 'prefsSeeded': True}
-        key = adapter.SECTIONS_KEY
+        sections_b = {'sections': [{'id': 'cg-1', 'kind': 'manual', 'name': '研究', 'members': []}, {'id': 'sessions', 'kind': 'sessions'}], 'prefsSeeded': True}
         live = self.official / 'Local Storage/leveldb'
         (self.official / 'Local Storage/sample').unlink(); (self.official / 'Local Storage').rmdir()
-        self.ldb_store(live, self.A_ID, scope_a, {key: {'value': {scope_a: in_a}, 'tabId': 't', 'timestamp': 100}})
+        self.desktop_folders(live, self.A_ID, scope_a, {scope_a: groups_a}, {scope_a: plain}, 100)
         saved_b = self.profiles / 'desktop-B' / 'Local Storage/leveldb'
-        self.ldb_store(saved_b, self.B_ID, scope_b, {key: {'value': {scope_b: moved, scope_a: plain}, 'tabId': 't', 'timestamp': 200}})
+        self.desktop_folders(saved_b, self.B_ID, scope_b, {scope_b: groups_b, scope_a: empty}, {scope_b: sections_b, scope_a: plain}, 200)
+        conversations = {p: p.read_bytes() for p in list((self.official / 'claude-code-sessions').rglob('*')) + list(self.user.rglob('*.jsonl')) if p.is_file()}
         before = adapter.ldb_state(saved_b)
         result = adapter.sync_conversations(self.data, self.root)
         self.assertTrue(result['Folders'])
-        stored = lambda: json.loads(adapter.ls_text(adapter.ldb_state(live)[0][adapter.ls_key(key)]))
-        # First sync: B's newer folders lead, and A's own folder is kept for what is not filed yet.
-        merged = {'sections': moved['sections'] + [dict(in_a['sections'][0], members=[other])], 'prefsSeeded': True}
-        self.assertEqual(stored()['value'], {scope_a: merged, scope_b: merged})
-        self.assertEqual(stored()['tabId'], 't')
+        # Conversation indexes and transcripts are never touched by the folder step.
+        self.assertEqual({p: p.read_bytes() for p in conversations}, conversations)
+        self.assertEqual(result['Updated'], 0)
+        # First sync: A (the first account) leads; B adds its own folder, but the conversation both list stays in A's.
+        merged = {'groups': [{'id': 'cg-a', 'name': 'A folder'}, {'id': 'cg-1', 'name': '研究'}],
+                  'assignments': {mine: 'cg-a', other: 'cg-a'}, 'order': {'cg-a': [mine, other], 'cg-1': []}}
+        state = self.frame(live)['state']
+        self.assertEqual(state['customGroupsByScope'], {scope_a: merged, scope_b: merged})
+        sections = {'sections': plain['sections'] + [sections_b['sections'][0]], 'prefsSeeded': True}
+        self.assertEqual(state['codeSidebarByScope'], {scope_a: sections, scope_b: sections})
+        self.assertEqual(adapter.read(self.data / 'conversation-sync-state.json')['PrimaryAccount'], self.A_ID)
+        self.assertEqual((state['interfaceFont'], state['collapsedGroups'], state['lastSidebarScopeKey']), ('思源黑体', ['project-C:\\p'], scope_a))
+        self.assertEqual(self.mirror(live, 0)['value'], state['customGroupsByScope'])  # Mirrors agree with the state.
+        self.assertEqual(self.mirror(live, 1)['value'], state['codeSidebarByScope'])
         self.assertEqual(adapter.ldb_state(saved_b), before)  # Saved logins are only read.
         journal = adapter.read(result['Journal'])
-        self.assertTrue((Path(journal['Sidebar']['Backup']) / '000003.log').is_file())
+        self.assertTrue(journal['Verified'] and journal['BackupRemoved'])
+        self.assertFalse(Path(journal['Sidebar']['Backup']).exists())
+        # Desktop is asked to merge the server copy in and upload, instead of letting the server copy win.
+        pending = adapter.ldb_state(live)[0][adapter.ls_key(adapter.SYNC_PENDING_KEY)]
+        self.assertEqual(adapter.ls_text(pending), '1|migrate')
+        # Desktop starting up rebuilds the mirrors from the same state: nothing to do.
+        self.rewrite_frame(live, {}, self.mirror(live, 0)['timestamp'] + 2500)
         self.assertFalse(adapter.sync_conversations(self.data, self.root)['Folders'])
-        # Later, A deletes its folder in Desktop; B's stale saved copy must not bring it back.
-        values, last = adapter.ldb_state(live)
-        edited = dict(stored(), timestamp=stored()['timestamp'] + 1000)
-        edited['value'] = dict(edited['value'], **{scope_a: moved})
-        adapter.ldb_put(live, [(adapter.ls_key(key), adapter.ls_value(json.dumps(edited, ensure_ascii=False)))], last)
+        # Minutes later, A deletes its own folder and files the conversation under 研究; B's stale copy must not undo it.
+        kept = {'groups': [{'id': 'cg-1', 'name': '研究'}], 'assignments': {mine: 'cg-1'}, 'order': {'cg-1': [mine]}}
+        self.rewrite_frame(live, {'customGroupsByScope': dict(state['customGroupsByScope'], **{scope_a: kept})},
+                           self.mirror(live, 0)['timestamp'] + 180_000)
         self.assertTrue(adapter.sync_conversations(self.data, self.root)['Folders'])
-        self.assertEqual(stored()['value'], {scope_a: moved, scope_b: moved})
+        self.assertEqual(self.frame(live)['state']['customGroupsByScope'], {scope_a: kept, scope_b: kept})
+        self.assertEqual({p: p.read_bytes() for p in conversations}, conversations)
+
+    def test_old_mirror_only_baseline_is_ignored(self):
+        """0.4.1 stored a baseline of mirrors Desktop then rebuilt; it must not read as a deletion."""
+        org_a = 'aaaaaaaa-0000-4000-8000-000000000001'
+        scope_a, scope_b = f'{self.A_ID}/{org_a}', f'{self.B_ID}/bbbbbbbb-0000-4000-8000-000000000002'
+        (self.user / '.claude/projects/p').mkdir(parents=True)
+        (self.user / '.claude/projects/p/cli-g.jsonl').write_text('{}', encoding='utf-8')
+        self.session(self.A_ID, org_a, '60000000-0000-4000-8000-000000000001', 'cli-g')
+        self.session(self.B_ID, scope_b.split('/')[1], '60000000-0000-4000-8000-000000000001', 'cli-g')
+        folder_b = {'groups': [{'id': 'cg-u', 'name': 'Useful Tools'}], 'assignments': {'code:local_x': 'cg-u'}, 'order': {}}
+        empty = {'groups': [], 'assignments': {}, 'order': {}}
+        live = self.official / 'Local Storage/leveldb'
+        (self.official / 'Local Storage/sample').unlink(); (self.official / 'Local Storage').rmdir()
+        self.desktop_folders(live, self.A_ID, scope_a, {scope_a: empty, scope_b: folder_b}, {}, 5000)
+        adapter.atomic_json(self.data / 'conversation-sync-state.json', {'Sidebar': {adapter.SIDEBAR_KEYS[0]: {'Layout': folder_b, 'Moment': 10}}})
+        adapter.sync_conversations(self.data, self.root)
+        self.assertEqual(self.frame(live)['state']['customGroupsByScope'], {scope_a: folder_b, scope_b: folder_b})
+
+    def two_scopes_with_a_folder(self):
+        """A and B share one conversation; A (the live account) files it in "Useful Tools"."""
+        org_a, org_b = 'aaaaaaaa-0000-4000-8000-000000000001', 'bbbbbbbb-0000-4000-8000-000000000002'
+        scope_a, scope_b = f'{self.A_ID}/{org_a}', f'{self.B_ID}/{org_b}'
+        sid = '80000000-0000-4000-8000-000000000001'
+        (self.user / '.claude/projects/p').mkdir(parents=True)
+        (self.user / '.claude/projects/p/cli-h.jsonl').write_text('{"keep": true}', encoding='utf-8')
+        self.session(self.A_ID, org_a, sid, 'cli-h', title='A title', titleSource='user', previousTitles=['x'])
+        self.session(self.B_ID, org_b, sid, 'cli-h', title='B title')
+        folder = {'groups': [{'id': 'cg-u', 'name': 'Useful Tools'}], 'assignments': {f'code:local_{sid}': 'cg-u'}, 'order': {'cg-u': [f'code:local_{sid}']}}
+        empty = {'groups': [], 'assignments': {}, 'order': {}}
+        live = self.official / 'Local Storage/leveldb'
+        (self.official / 'Local Storage/sample').unlink(); (self.official / 'Local Storage').rmdir()
+        self.desktop_folders(live, self.A_ID, scope_a, {scope_a: folder, scope_b: empty}, {}, 100)
+        return live, scope_a, scope_b, folder, empty
+
+    def test_server_copy_wiping_folders_right_after_a_sync_does_not_spread(self):
+        live, scope_a, scope_b, folder, empty = self.two_scopes_with_a_folder()
+        adapter.sync_conversations(self.data, self.root)
+        self.assertEqual(self.frame(live)['state']['customGroupsByScope'], {scope_a: folder, scope_b: folder})
+        # Seconds later Desktop applies B's stale server copy to B's scope (what 0.4.2 ran into).
+        wiped = dict(self.frame(live)['state']['customGroupsByScope'], **{scope_b: empty})
+        self.rewrite_frame(live, {'customGroupsByScope': wiped}, self.mirror(live, 0)['timestamp'] + 4000)
+        adapter.sync_conversations(self.data, self.root)
+        self.assertEqual(self.frame(live)['state']['customGroupsByScope'], {scope_a: folder, scope_b: folder})
+        self.assertEqual(adapter.ls_text(adapter.ldb_state(live)[0][adapter.ls_key(adapter.SYNC_PENDING_KEY)]), '1|migrate')
+
+    def test_0_4_2_baseline_is_replaced_by_a_fresh_merge(self):
+        live, scope_a, scope_b, folder, empty = self.two_scopes_with_a_folder()
+        # 0.4.2 recorded the folder, then the server copy wiped A's scope; that must not read as a deletion.
+        adapter.atomic_json(self.data / 'conversation-sync-state.json', {'PrimaryAccount': self.A_ID, 'Folders': {
+            'customGroupsByScope': {'Layout': folder, 'Moment': 1, 'Scopes': [scope_a, scope_b]}}})
+        self.rewrite_frame(live, {'customGroupsByScope': {scope_a: folder, scope_b: empty}}, 10_000)
+        adapter.sync_conversations(self.data, self.root)
+        self.assertEqual(self.frame(live)['state']['customGroupsByScope'], {scope_a: folder, scope_b: folder})
+
+    def test_no_upload_mark_in_a_store_another_account_owns(self):
+        live, *_ = self.two_scopes_with_a_folder()
+        values, last = adapter.ldb_state(live)
+        adapter.ldb_put(live, [(adapter.ls_key('ccd-sync-owner'), adapter.ls_value(self.B_ID))], last)
+        self.assertTrue(adapter.sync_conversations(self.data, self.root)['Folders'])
+        self.assertNotIn(adapter.ls_key(adapter.SYNC_PENDING_KEY), adapter.ldb_state(live)[0])
+
+    def test_failed_verification_restores_everything_and_keeps_the_backup(self):
+        live, scope_a, scope_b, folder, empty = self.two_scopes_with_a_folder()
+        indexes = {p: p.read_bytes() for p in (self.official / 'claude-code-sessions').rglob('*') if p.is_file()}
+        transcripts = {p: p.read_bytes() for p in self.user.rglob('*.jsonl')}
+        store = adapter.ldb_state(live)
+        with patch.object(adapter, 'verify_sync', return_value='fixture problem'):
+            with self.assertRaisesRegex(ValueError, '已恢复到同步前的状态'):
+                adapter.sync_conversations(self.data, self.root)
+        self.assertEqual({p: p.read_bytes() for p in (self.official / 'claude-code-sessions').rglob('*') if p.is_file()}, indexes)
+        self.assertEqual({p: p.read_bytes() for p in self.user.rglob('*.jsonl')}, transcripts)
+        self.assertEqual(adapter.ldb_state(live), store)
+        journal = adapter.read(next((self.data / 'conversation-sync').glob('*.json')))
+        self.assertEqual((journal['Status'], journal['Problem']), ('rolled-back', 'fixture problem'))
+        backup = next((self.data / 'conversation-sync-originals').iterdir())
+        self.assertTrue((backup / 'Local Storage/000003.log').is_file())
+        self.assertTrue(any(backup.rglob('local_*.json')))
+
+    def test_first_account_leads_and_same_named_folders_merge(self):
+        """A logged in first. B's own folders and B-only conversations are added; shared ones follow A."""
+        org_a, org_b = 'aaaaaaaa-0000-4000-8000-000000000001', 'bbbbbbbb-0000-4000-8000-000000000002'
+        scope_a, scope_b = f'{self.A_ID}/{org_a}', f'{self.B_ID}/{org_b}'
+        ids = {k: f'7000000{i}-0000-4000-8000-000000000001' for i, k in enumerate(('both_a', 'both_free', 'only_b', 'tool_b', 'cwd_only'))}
+        code = {k: 'code:local_' + v for k, v in ids.items()}
+        (self.user / '.claude/projects/p').mkdir(parents=True)
+        for k, sid in ids.items():
+            (self.user / '.claude/projects/p' / f'cli-{k}.jsonl').write_text('{}', encoding='utf-8')
+            cwd = 'E:\\work\\useful tools' if k in ('tool_b', 'cwd_only') else 'E:\\work\\other'
+            if k not in ('only_b', 'tool_b'):
+                self.session(self.A_ID, org_a, sid, f'cli-{k}', cwd=cwd)
+            if k != 'cwd_only':
+                self.session(self.B_ID, org_b, sid, f'cli-{k}', cwd=cwd)
+        # The first account is decided by when each account first used Desktop here, not by its ID.
+        first_use = {self.A_ID: 9, self.B_ID: 1}
+        since = patch.object(adapter, 'account_since', lambda folder: first_use[folder.name])
+        since.start(); self.addCleanup(since.stop)
+        organizations = adapter.index_copies(self.official / 'claude-code-sessions')[0]
+        self.assertEqual(adapter.primary_account(organizations), self.B_ID)
+        first_use.update({self.A_ID: 1, self.B_ID: 9})
+        groups_a = {'groups': [{'id': 'cg-u', 'name': 'Useful Tools'}, {'id': 'cg-p', 'name': 'Papers'}],
+                    'assignments': {code['both_a']: 'cg-p'}, 'order': {'cg-p': [code['both_a']], 'cg-u': []}}
+        groups_b = {'groups': [{'id': 'cg-x', 'name': 'useful tools '}, {'id': 'cg-b', 'name': 'B only'}],
+                    'assignments': {code['both_a']: 'cg-b', code['both_free']: 'cg-b', code['only_b']: 'cg-b', code['tool_b']: 'cg-x'},
+                    'order': {'cg-b': [code['both_a'], code['both_free'], code['only_b']], 'cg-x': [code['tool_b']]}}
+        live = self.official / 'Local Storage/leveldb'
+        (self.official / 'Local Storage/sample').unlink(); (self.official / 'Local Storage').rmdir()
+        # B is logged in now and changed its folders last; A's layout is in its saved login.
+        self.desktop_folders(live, self.B_ID, scope_b, {scope_b: groups_b}, {}, 900)
+        self.desktop_folders(self.profiles / 'desktop-A' / 'Local Storage/leveldb', self.A_ID, scope_a, {scope_a: groups_a}, {}, 100)
+        conversations = {p: p.read_bytes() for p in self.user.rglob('*.jsonl')}
+        adapter.sync_conversations(self.data, self.root)
+        result = self.frame(live)['state']['customGroupsByScope']
+        self.assertEqual(result[scope_a], result[scope_b])
+        layout = result[scope_a]
+        names = {g['id']: g['name'] for g in layout['groups']}
+        self.assertEqual(sorted(names.values()), ['B only', 'Papers', 'Useful Tools'])  # "useful tools " is A's "Useful Tools".
+        placed = {k: names.get(layout['assignments'].get(c)) for k, c in code.items()}
+        self.assertEqual(placed, {'both_a': 'Papers',            # shared: A's folder
+                                  'both_free': None,             # shared and unfiled in A: stays by directory
+                                  'only_b': 'B only',            # B-only: kept in B's own folder
+                                  'tool_b': 'Useful Tools',      # B-only, B's same-named folder maps to A's
+                                  'cwd_only': 'Useful Tools'})   # unfiled, directory named like a folder
+        self.assertEqual(layout['order']['cg-b'], [code['only_b']])
+        self.assertEqual({p: p.read_bytes() for p in conversations}, conversations)
+        self.assertEqual(adapter.read(self.data / 'conversation-sync-state.json')['PrimaryAccount'], self.A_ID)
 
     def test_snappy_blocks_and_torn_logs(self):
         self.assertEqual(adapter.unsnappy(b'\x0c\x0cabcd\x11\x04'), b'abcdabcdabcd')

@@ -755,7 +755,7 @@ $script:Window.Add_Closed({
 })
 $script:UI.CloseToTrayCheck.Add_Click({$script:CloseToTray=[bool]$script:UI.CloseToTrayCheck.IsChecked;Save-Preferences})
 $script:UI.AutoSyncCheck.Add_Click({$script:AutoSync=[bool]$script:UI.AutoSyncCheck.IsChecked;Save-Preferences})
-$script:UI.SyncBtn.Add_Click({Confirm-ClaudeExit '同步所有账号的对话列表' '把每个官方账号的对话补到其他账号的列表里，并统一各账号的对话标题、工作目录和侧栏文件夹（以最后修改的为准），之后在任一账号登录看到的都一样。不删除条目；在某账号删除过的对话不会被加回该账号；改写前先备份原文件。原文本来就在本机共享，不会复制。' '立即同步' @{Action='sync-conversations'} '正在同步对话列表…'})
+$script:UI.SyncBtn.Add_Click({Confirm-ClaudeExit '同步所有账号的对话列表' '把每个官方账号的对话补到其他账号的列表里，并统一各账号的对话标题、工作目录和侧栏文件夹（以最后修改的为准），之后在任一账号登录看到的都一样。不删除条目；在某账号删除过的对话不会被加回该账号；改写前先备份，写入后校验，校验失败自动恢复，校验通过才删除备份。原文本来就在本机共享，不会复制。' '立即同步' @{Action='sync-conversations'} '正在同步对话列表…'})
 $script:UI.AutostartCheck.Add_Click({Set-Autostart ([bool]$script:UI.AutostartCheck.IsChecked);Sync-StartupOptions})
 $script:UI.ThemeBtn.Add_Click({Set-Theme (-not $script:Dark)})
 $script:UI.SettingsThemeBtn.Add_Click({Set-Theme (-not $script:Dark)})

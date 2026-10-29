@@ -14,7 +14,7 @@ import hmac
 import http.server
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import secrets
 import shutil
@@ -2736,6 +2736,7 @@ def ldb_put(folder, items, last):
         with path.open('r+b') as stream:
             stream.truncate(len(original))
         raise ValueError('Local Storage 写入校验失败，已恢复原文件。')
+    return path, len(original)
 
 
 def ls_key(name):
@@ -2762,8 +2763,17 @@ TITLE_FIELDS = ('title', 'titleSource', 'titleTurn', 'previousTitles')
 EDITED_FIELDS = (TITLE_FIELDS, ('cwd', 'originCwd', 'gitAnchorsFolderRealpath', 'requestedAdditionalFolders', 'shellFolders'))
 PROGRESS_FIELDS = ('cliSessionId', 'priorCliSessionIds', 'lastActivityAt', 'completedTurns', 'lastAssistantUuid',
                    'lastTurnEdgeAt', 'latestUserFrameAt')
-# Sidebar folders, kept per "account/organization" scope inside Local Storage.
-SIDEBAR_KEYS = ('LSS-persisted.dframe-code-sections', 'LSS-persisted.dframe-group-scopes')
+# Sidebar folders, kept per "account/organization" scope inside Local Storage. Desktop's own record is a
+# field of the dframe-store state; each LSS key is a mirror it rebuilds from that field on startup, and
+# the mirror's timestamp tells when the folders were last changed.
+SIDEBAR_FIELDS = (('customGroupsByScope', 'LSS-persisted.dframe-group-scopes'),
+                  ('codeSidebarByScope', 'LSS-persisted.dframe-code-sections'))
+SIDEBAR_KEYS = tuple(mirror for _, mirror in SIDEBAR_FIELDS)
+# Desktop's mark for "local copy changed, upload it at the next sign-in"; the suffix asks it to merge
+# the server copy in first rather than replace it.
+SYNC_PENDING_KEY = 'ccd-sync-pending:ccd/dframe-store'
+SYNC_PENDING_MERGE = '1|migrate'
+SERVER_MERGE_GRACE = 120_000
 
 
 def fields(value, keys):
@@ -2810,84 +2820,199 @@ def index_copies(registry):
 
 
 def sidebar_candidates(stores):
-    """Per sidebar key, every scope's folders in every Local Storage copy: (written at, viewed last, layout)."""
+    """Per dframe-store field, every scope's folders in every Local Storage copy:
+    (changed at, viewed last in that copy, scope, layout)."""
     found = {}
     for folder, account in stores:
         try:
             values = ldb_state(folder)[0]
-            frame = json.loads(ls_text(values[ls_key('dframe-store')])) if ls_key('dframe-store') in values else {}
-            viewed = (frame.get('state') or {}).get('lastSidebarScopeKey')
-            for name in SIDEBAR_KEYS:
-                if ls_key(name) not in values:
-                    continue
-                item = json.loads(ls_text(values[ls_key(name)]))
-                for scope, layout in (item.get('value') or {}).items():
+            if ls_key('dframe-store') not in values:
+                continue
+            state = json.loads(ls_text(values[ls_key('dframe-store')])).get('state') or {}
+            viewed = state.get('lastSidebarScopeKey')
+            for field, mirror in SIDEBAR_FIELDS:
+                moment = json.loads(ls_text(values[ls_key(mirror)])).get('timestamp') or 0 if ls_key(mirror) in values else 0
+                for scope, layout in (state.get(field) or {}).items():
                     own = scope == viewed or (viewed is None and bool(account) and scope.startswith(account + '/'))
-                    found.setdefault(name, []).append((item.get('timestamp') or 0, own, layout))
+                    found.setdefault(field, []).append((moment, own, scope, layout))
         except (OSError, ValueError, IndexError, AttributeError):
             continue  # An unreadable saved copy only means it cannot be a source.
     return found
 
 
-def merged_layout(primary, others):
-    """The primary folders plus folders only the others have; conversations already filed stay put."""
-    layout = json.loads(json.dumps(primary))
-    if isinstance(layout.get('sections'), list):
-        filed = {m for s in layout['sections'] for m in s.get('members') or []}
-        for other in others:
-            for section in other.get('sections') or []:
-                if section.get('kind') == 'manual' and section.get('id') not in {s.get('id') for s in layout['sections']}:
-                    members = [m for m in section.get('members') or [] if m not in filed]
-                    layout['sections'].append(dict(section, members=members))
-                    filed.update(members)
-    if isinstance(layout.get('groups'), list):
-        for other in others:
-            known = {g.get('id') for g in layout['groups']}
-            layout['groups'] += [g for g in other.get('groups') or [] if g.get('id') not in known]
-            for member, group in (other.get('assignments') or {}).items():
-                layout.setdefault('assignments', {}).setdefault(member, group)
-            for group, members in (other.get('order') or {}).items():
-                layout.setdefault('order', {}).setdefault(group, members)
-    return layout
+def folder_name(value):
+    return str(value or '').strip().casefold()
 
 
-def sync_sidebar(official, profiles, scopes, backup, baseline):
-    """Give every account scope in the live Local Storage the same sidebar folders.
+def merge_groups(primary, secondary, shared):
+    """Custom folders: the primary's, plus folders only the secondary has, holding its own conversations.
 
-    The source is a scope edited after the last sync, preferring the one viewed last in the most
-    recently written copy. Before any sync, the folders of all accounts are merged so none is lost.
-    Returns the changed keys and the new baseline: each key's layout and the moment it was written.
+    A folder with the same name (ignoring case) is the same folder. Conversations the primary
+    account already lists keep the primary's placement; the secondary's other conversations keep theirs.
+    """
+    out = json.loads(json.dumps(primary or {}))
+    out.setdefault('groups', []); out.setdefault('assignments', {}); out.setdefault('order', {})
+    by_name, mapping = {folder_name(g.get('name')): g.get('id') for g in out['groups']}, {}
+    for group in (secondary or {}).get('groups') or []:
+        key = folder_name(group.get('name'))
+        if key not in by_name:
+            out['groups'].append(group)
+            by_name[key] = group.get('id')
+        mapping[group.get('id')] = by_name[key]
+    for member, group in ((secondary or {}).get('assignments') or {}).items():
+        if member not in shared and member not in out['assignments'] and group in mapping:
+            out['assignments'][member] = mapping[group]
+    for group, members in ((secondary or {}).get('order') or {}).items():
+        if group in mapping:
+            target = out['order'].setdefault(mapping[group], [])
+            target += [m for m in members if out['assignments'].get(m) == mapping[group] and m not in target]
+    return out
+
+
+def merge_sections(primary, secondary):
+    """Sidebar sections: the primary's, plus manual sections whose name it does not have yet."""
+    out = json.loads(json.dumps(primary or {}))
+    sections = out.setdefault('sections', [])
+    names = {folder_name(s.get('name')) for s in sections if s.get('kind') == 'manual'}
+    ids = {s.get('id') for s in sections}
+    for section in (secondary or {}).get('sections') or []:
+        if section.get('kind') == 'manual' and section.get('id') not in ids and folder_name(section.get('name')) not in names:
+            sections.append(section)
+            names.add(folder_name(section.get('name'))); ids.add(section.get('id'))
+    return out
+
+
+def file_by_directory(groups, folders):
+    """Put an unfiled conversation into the custom folder named like its working directory.
+
+    Desktop lists unfiled conversations under their directory's name, so a custom folder
+    "Useful Tools" next to the directory group "useful tools" would show the same place twice.
+    """
+    out = json.loads(json.dumps(groups))
+    by_name = {folder_name(g.get('name')): g.get('id') for g in out.get('groups') or []}
+    for member, cwd in sorted(folders.items()):
+        group = by_name.get(folder_name(PureWindowsPath(cwd).name)) if cwd else None
+        if group and member not in out.setdefault('assignments', {}):
+            out['assignments'][member] = group
+            out.setdefault('order', {}).setdefault(group, []).append(member)
+    return out
+
+
+def account_since(folder):
+    """When Desktop created the account's conversation folder, i.e. first used it on this computer."""
+    info = os.stat(folder)
+    return getattr(info, 'st_birthtime', info.st_ctime)
+
+
+def account_order(organizations, primary=None):
+    """Accounts by first use, the primary one first."""
+    since = lambda account: (account != primary, account_since(organizations[account][0][0].parent), account)
+    return sorted(organizations, key=since)
+
+
+def primary_account(organizations, chosen=None):
+    """The account whose folders lead: kept once chosen, else the first to use Desktop on this computer."""
+    if chosen in organizations:
+        return chosen
+    used = {account: orgs for account, orgs in organizations.items() if any(u for _, u in orgs)}
+    return (account_order(used or organizations) or [None])[0]
+
+
+def dropped_since(layout, before):
+    """Whether a layout lost folders, filings or sections that the last synced layout had."""
+    if 'groups' in before:
+        ids, filed = {g.get('id') for g in layout.get('groups') or []}, layout.get('assignments') or {}
+        return any(g.get('id') not in ids for g in before.get('groups') or []) or any(m not in filed for m in before.get('assignments') or {})
+    ids = {s.get('id') for s in layout.get('sections') or []}
+    return any(s.get('id') not in ids for s in before.get('sections') or [])
+
+
+def plan_sidebar(official, profiles, organizations, primary, present, folders, baseline):
+    """Plan the same sidebar folders for every account scope in the live Local Storage; write nothing.
+
+    The first time, the primary account's folders lead and each other account adds the folders only
+    it has, holding the conversations only it listed (see merge_groups). Afterwards a scope edited
+    since the last sync leads, and an account seen for the first time is merged in the same way.
+    Unfiled conversations join the custom folder named like their working directory.
+    Desktop keeps these folders per account on Anthropic's server too and, on sign-in, lets the server
+    copy win unless the store is marked as changed locally. The plan therefore sets Desktop's own
+    pending-upload mark, in the mode that merges the server copy in before uploading.
+    Only the folder fields of dframe-store, their mirrors and that mark change; every other value is kept.
+    Returns None when nothing changes, else the live store, its values, the batch to append and the new baseline.
     """
     live = official / 'Local Storage' / 'leveldb'
     if not (live / 'CURRENT').is_file():
-        return [], baseline
-    stores = [(live, read(official / 'config.json').get('lastKnownAccountUuid'))]
+        return None
+    account = read(official / 'config.json').get('lastKnownAccountUuid')
+    stores = [(live, account)]
     for profile in sorted(profiles.iterdir()) if profiles.is_dir() else []:
         folder = profile / 'Local Storage' / 'leveldb'
         if not profile.name.startswith('.') and not profile.is_symlink() and (folder / 'CURRENT').is_file():
             stores.append((folder, read(profile / 'config.json').get('lastKnownAccountUuid')))
     values, last = ldb_state(live)
-    items, result = [], {}
-    for name, candidates in sidebar_candidates(stores).items():
-        before = baseline.get(name)
-        rank = lambda row: (row[0], row[1])
+    if ls_key('dframe-store') not in values:
+        return None
+    frame = json.loads(ls_text(values[ls_key('dframe-store')]))
+    state = frame.get('state')
+    if not isinstance(state, dict):
+        raise ValueError('Claude 侧栏设置格式无法识别，未修改文件夹。')
+    moment, changed, mirrors, result = int(time.time() * 1000), [], [], {}
+    candidates = sidebar_candidates(stores)
+    owned = {account: [f'{account}/{org.name}' for org, used in orgs if used] or [f'{account}/{org.name}' for org, _ in orgs]
+             for account, orgs in organizations.items()}
+    scopes = {scope for listed in owned.values() for scope in listed}
+    order = account_order(organizations, primary)
+    shared = present.get(primary, set())
+    for field, mirror in SIDEBAR_FIELDS:
+        rows = candidates.get(field)
+        if not rows:
+            continue
+        merge = (lambda p, s: merge_groups(p, s, shared)) if field == 'customGroupsByScope' else merge_sections
+
+        def own_layout(account):
+            # The copy of the account's scope from the store where it was viewed last, newest first.
+            mine = [row for row in rows if row[2] in owned.get(account, [])]
+            return max(mine, key=lambda row: (row[1], row[0]))[3] if mine else None
+
+        before = baseline.get(field)
         if before is None:
-            primary = max(candidates, key=rank)[2]
-            layout = merged_layout(primary, [row[2] for row in sorted(candidates, key=rank, reverse=True)])
+            layout, joined = own_layout(primary) or {}, order[1:]
         else:
-            edited = [row for row in candidates if row[0] > before['Moment'] and row[2] != before['Layout']]
-            layout = max(edited, key=rank)[2] if edited else before['Layout']
-        current = json.loads(ls_text(values[ls_key(name)])) if ls_key(name) in values else {}
-        known = current.get('value') or {}
+            # Losing folders right after a sync is Desktop applying the server copy, not the user.
+            edited = [row for row in rows if row[0] > before['Moment'] and row[3] != before['Layout']
+                      and not (row[0] - before['Moment'] < SERVER_MERGE_GRACE and dropped_since(row[3], before['Layout']))]
+            layout = max(edited, key=lambda row: (row[0], row[1]))[3] if edited else before['Layout']
+            joined = [a for a in order[1:] if not set(owned.get(a, [])) & set(before.get('Scopes') or [])]
+        for other in joined:
+            if own_layout(other) is not None:
+                layout = merge(layout, own_layout(other))
+        if field == 'customGroupsByScope':
+            layout = file_by_directory(layout, folders)
+        known = state.get(field) or {}
         wanted = {scope: layout for scope in set(known) | scopes}
-        if wanted != known:
-            current.update({'value': wanted, 'timestamp': int(time.time() * 1000)})
-            items.append((name, ls_value(json.dumps(current, ensure_ascii=False, separators=(',', ':')))))
-        result[name] = {'Layout': layout, 'Moment': current.get('timestamp') or 0}
-    if items:
-        shutil.copytree(live, backup)
-        ldb_put(live, [(ls_key(name), value) for name, value in items], last)
-    return [name for name, _ in items], result
+        current = json.loads(ls_text(values[ls_key(mirror)])) if ls_key(mirror) in values else {}
+        if wanted != known or current.get('value') != wanted:
+            state[field] = wanted
+            current.update({'value': wanted, 'timestamp': moment})
+            changed.append(field)
+            mirrors.append((ls_key(mirror), ls_value(json.dumps(current, ensure_ascii=False, separators=(',', ':')))))
+        result[field] = {'Layout': layout, 'Moment': moment if field in changed else current.get('timestamp') or 0,
+                         'Scopes': sorted(wanted)}
+    if not changed:
+        return {'Changed': [], 'Baseline': result}
+    text = json.dumps(frame, ensure_ascii=False, separators=(',', ':'))
+    original = json.loads(ls_text(values[ls_key('dframe-store')]))
+    check = json.loads(text)
+    for field in changed:
+        check['state'].pop(field, None)
+        original['state'].pop(field, None)
+    if check != original:
+        raise ValueError('侧栏设置改写校验失败，未修改文件夹。')
+    items = [(ls_key('dframe-store'), ls_value(text))] + mirrors
+    owner = values.get(ls_key('ccd-sync-owner'))
+    if owner is None or ls_text(owner) == account:  # Desktop drops the mark in a store another account owns.
+        items.append((ls_key(SYNC_PENDING_KEY), ls_value(SYNC_PENDING_MERGE)))
+    return {'Changed': changed, 'Baseline': result, 'Live': live, 'Values': values, 'Last': last, 'Items': items}
 
 
 def write_index(path, value, digest=None):
@@ -2950,50 +3075,123 @@ def sync_conversations(data_root, fixture=None):
                 if 'bridgeSessionIds' in copy:
                     copy['bridgeSessionIds'] = []
                 plan.append((org / name, copy))
+    # Which conversations each account listed before this sync added any, and where each one works.
+    present = {}
+    for name, rows in copies.items():
+        for path, *_ in rows:
+            present.setdefault(path.parent.parent.name, set()).add('code:' + Path(name).stem)
+    directories = {'code:' + Path(name).stem: value.get('cwd') for name, value in unified.items()}
+    primary = primary_account(organizations, state.get('PrimaryAccount'))
+    # 'FolderLayout' replaces earlier baselines: 0.4.1 tracked mirrors Desktop rebuilt, and 0.4.2 recorded
+    # layouts the server copy then overwrote, which must not be mistaken for the user deleting folders.
+    sidebar, planning_error = state.get('FolderLayout') or {}, None
+    try:
+        folders = plan_sidebar(official, profiles, organizations, primary, present, directories, sidebar)
+    except (OSError, ValueError, IndexError, KeyError, AttributeError) as error:
+        folders, planning_error = None, str(error)
+    writes_folders = bool(folders and folders['Changed'])
     moment = stamp()
     journal = Path(data_root) / 'conversation-sync' / (moment + '.json')
     originals = Path(data_root) / 'conversation-sync-originals' / moment
     created = [{'Path': str(target)} for target, _ in plan]
-    updated = [{'Path': str(path), 'Backup': str(originals / path.relative_to(official))} for path, _, _ in updates]
+    updated = [{'Path': str(path), 'Backup': str(originals / path.relative_to(official)), 'Skipped': False}
+               for path, _, _ in updates]
     record = {'Status': 'applying', 'Created': created, 'Updated': updated}
-    if plan or updates:
+    if plan or updates or writes_folders:
+        # Back up everything about to change, write, verify, and remove the backup only once verified.
+        before_indexes = set((official / 'claude-code-sessions').glob('*/*/local_*.json'))
+        before_transcripts = {p: p.stat().st_size for p in (user / '.claude/projects').glob('*/*.jsonl')}
+        for entry, (path, _, _) in zip(updated, updates):
+            Path(entry['Backup']).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, entry['Backup'])
+        if writes_folders:
+            shutil.copytree(folders['Live'], originals / 'Local Storage')
+            record['Sidebar'] = {'Keys': folders['Changed'], 'Backup': str(originals / 'Local Storage')}
         atomic_json(journal, record)
-    for entry, (target, value) in zip(created, plan):
-        write_index(target, value)
-        entry['Sha256'] = sha(target)
-    for entry, (path, value, digest) in zip(updated, updates):
-        Path(entry['Backup']).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, entry['Backup'])
-        entry['Skipped'] = not write_index(path, value, digest)
-        entry['Sha256'] = sha(path)
-    record['Updated'] = [entry for entry in updated if not entry['Skipped']]
-    scopes = {f'{account}/{org.name}' for account, orgs in organizations.items() for org, used in orgs if used}
-    sidebar = state.get('Sidebar') or {}
-    try:
-        folders, sidebar = sync_sidebar(official, profiles, scopes, originals / 'Local Storage', sidebar)
-        if folders:
-            record['Sidebar'] = {'Keys': folders, 'Backup': str(originals / 'Local Storage')}
-    except (OSError, ValueError, IndexError) as error:
-        folders, record['SidebarError'] = [], str(error)
-    if plan or updates or folders or 'SidebarError' in record:
-        record['Status'] = 'committed'
+        appended = None
+        try:
+            for entry, (target, value) in zip(created, plan):
+                write_index(target, value)
+                entry['Sha256'] = sha(target)
+            for entry, (path, value, digest) in zip(updated, updates):
+                entry['Skipped'] = not write_index(path, value, digest)
+                entry['Sha256'] = sha(path)
+            if writes_folders:
+                appended = ldb_put(folders['Live'], folders['Items'], folders['Last'])
+            problem = verify_sync(before_indexes, before_transcripts, zip(created, plan), zip(updated, updates),
+                                  folders if writes_folders else None)
+        except Exception as error:
+            problem = str(error) or type(error).__name__
+        if problem:
+            rollback_sync(created, updated, appended)
+            record.update({'Status': 'rolled-back', 'Problem': problem})
+            atomic_json(journal, record)
+            raise ValueError(f'同步后校验未通过（{problem}），已恢复到同步前的状态，备份保留在 {originals}。')
+        if originals.exists():
+            shutil.rmtree(originals)  # Only this sync's own backup folder, after every change was verified.
+        record.update({'Status': 'committed', 'Updated': [e for e in updated if not e['Skipped']],
+                       'Verified': True, 'BackupRemoved': True})
+        if planning_error:
+            record['SidebarError'] = planning_error
+        atomic_json(journal, record)
+    elif planning_error:
+        record.update({'Status': 'committed', 'SidebarError': planning_error})
         atomic_json(journal, record)
     atomic_json(state_path, {'Conversations': {name: [fields(value, keys) for keys in EDITED_FIELDS] for name, value in unified.items()},
-                             'Sidebar': sidebar})
+                             'PrimaryAccount': primary, 'FolderLayout': folders['Baseline'] if folders else sidebar})
     parts = []
     if created:
         parts.append(f'补齐 {len(created)} 条对话到 {len({Path(e["Path"]).parent.parent.name for e in created})} 个账号的列表')
     if record['Updated']:
         parts.append(f'统一了 {len(record["Updated"])} 个对话条目的标题、目录或进度')
-    if folders:
-        parts.append('统一了各账号的侧栏文件夹')
-    message = ('已' + '，'.join(parts) + '。') if parts else '各账号的对话列表已一致。'
-    if 'SidebarError' in record:
-        message += f' 侧栏文件夹未同步：{record["SidebarError"]}'
-    result = {'Created': len(created), 'Updated': len(record['Updated']), 'Folders': bool(folders), 'Message': message}
-    if plan or updates or folders or 'SidebarError' in record:
+    if writes_folders:
+        parts.append('统一了各账号的侧栏文件夹（Claude 下次启动时会合并并上传到账号设置）')
+    message = ('已' + '，'.join(parts) + '，校验通过后已清理本次备份。') if parts else '各账号的对话列表已一致。'
+    if planning_error:
+        message += f' 侧栏文件夹未同步：{planning_error}'
+    result = {'Created': len(created), 'Updated': len(record['Updated']), 'Folders': writes_folders, 'Message': message}
+    if plan or updates or writes_folders or planning_error:
         result['Journal'] = str(journal)
     return result
+
+
+def verify_sync(before_indexes, before_transcripts, created, updated, folders):
+    """What does not hold after a sync's writes, or None when everything is exactly as planned."""
+    if any(not path.is_file() for path in before_indexes):
+        return '有对话条目在同步后不见了'
+    if any(not path.is_file() or path.stat().st_size < size for path, size in before_transcripts.items()):
+        return '有对话原文在同步期间变短或不见了'
+    for entry, (target, value) in created:
+        if read(target) != json.loads(json.dumps(value)):
+            return '补齐的对话条目内容与预期不符'
+    for entry, (path, value, _) in updated:
+        if not entry['Skipped'] and read(path) != json.loads(json.dumps(value)):
+            return '统一后的对话条目内容与预期不符'
+    if folders:
+        expected = dict(folders['Values'])
+        expected.update(folders['Items'])
+        if ldb_state(folders['Live'])[0] != expected:
+            return '侧栏设置写入后与预期不符'
+    return None
+
+
+def rollback_sync(created, updated, appended):
+    """Undo a sync's writes. Only files that still hold exactly what this sync wrote are touched."""
+    if appended:
+        path, length = appended
+        with path.open('r+b') as stream:
+            stream.truncate(length)
+            stream.flush(); os.fsync(stream.fileno())
+    for entry in updated:
+        path, backup = Path(entry['Path']), Path(entry['Backup'])
+        if entry.get('Sha256') and not entry['Skipped'] and backup.is_file() and path.is_file() and sha(path) == entry['Sha256']:
+            temporary = path.with_name(path.name + '.' + secrets.token_hex(5) + '.tmp')
+            shutil.copy2(backup, temporary)
+            os.replace(temporary, path)
+    for entry in created:
+        path = Path(entry['Path'])
+        if entry.get('Sha256') and path.is_file() and sha(path) == entry['Sha256']:
+            path.unlink()  # A copy this sync created itself; the conversation's own account keeps its index.
 
 
 def get_provider(identifier, db=None, data_root=None, fixture=None):
