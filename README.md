@@ -10,11 +10,14 @@
 
 ## Download and install
 
-Download `ClaudeSwitchStudio-0.3.1-Setup.exe` from [Releases](https://github.com/dantengs/ClaudeSwitchStudio/releases) and follow the installer. The default location is `D:\programfile\Claude Switch Studio`; you can choose another directory. If drive D is unavailable, setup uses the current user's programs directory.
+Download an installer from [Releases](https://github.com/dantengs/ClaudeSwitchStudio/releases) and follow the setup wizard:
+
+- **0.4.0-preview (pre-release)**: `ClaudeSwitchStudio-0.4.0-preview-Setup.exe`, with the unified account page, third-party accounts and access table, multiple Codex accounts, usage statistics, MCP and skill toggles, WebDAV cloud backup, and more. It is a preview: the new features have only been verified in test environments, so read the [release notes (Chinese)](RELEASE_NOTES.md) first.
+- **0.3.1 (stable)**: `ClaudeSwitchStudio-0.3.1-Setup.exe`.
+
+ The default location is `D:\programfile\Claude Switch Studio`; you can choose another directory. If drive D is unavailable, setup uses the current user's programs directory.
 
 Open **Claude Switch Studio** from the desktop or Start menu. The installation includes an EXE launcher, original application icons, and the required Python runtime, without changing the system PATH. A three-step guide appears on first launch and can be reopened in Settings.
-
-> The source in this repository is now **0.4.0-preview** (unified account page, third-party accounts and access table, multiple Codex accounts, usage statistics, MCP and skill toggles, WebDAV cloud backup, and more). No installer has been released for it yet; the 0.3.1 installer on the release page does not include these features. To try it, build it as described under “Development and builds”. See the [release notes (Chinese)](RELEASE_NOTES.md) for what changed.
 
 The installer is currently unsigned. Download it from this repository's release page and verify the accompanying `.sha256` file. Setup does not close or operate Claude. Close this utility before upgrading it.
 

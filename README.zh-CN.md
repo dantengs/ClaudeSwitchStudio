@@ -10,11 +10,14 @@
 
 ## 下载与安装
 
-从 [Releases](https://github.com/dantengs/ClaudeSwitchStudio/releases) 下载 `ClaudeSwitchStudio-0.3.1-Setup.exe`，按安装向导操作。默认安装到 `D:\programfile\Claude Switch Studio`，也可以选择其他目录。没有 D 盘时使用当前用户的程序目录。
+从 [Releases](https://github.com/dantengs/ClaudeSwitchStudio/releases) 下载安装包，按安装向导操作：
+
+- **0.4.0-preview（预发布版）**：`ClaudeSwitchStudio-0.4.0-preview-Setup.exe`，包含统一账号管理、第三方账号与接入表、Codex 多账号、用量统计、MCP 与技能开关、WebDAV 云备份等新功能。这是预览版，新功能只在测试环境中验证过，请先阅读 [更新说明](RELEASE_NOTES.md)。
+- **0.3.1（稳定版）**：`ClaudeSwitchStudio-0.3.1-Setup.exe`。
+
+默认安装到 `D:\programfile\Claude Switch Studio`，也可以选择其他目录。没有 D 盘时使用当前用户的程序目录。
 
 安装后打开桌面或开始菜单中的 **Claude Switch Studio**。安装包含独立 EXE 入口、自有图标和所需 Python 运行时，无需修改系统 PATH。首次启动提供三步新手指引，设置页可以重新查看。
-
-> 本仓库源码已更新到 **0.4.0-preview**（统一账号管理、第三方账号与接入表、Codex 多账号、用量统计、MCP 与技能开关、WebDAV 云备份等），尚未发布对应安装包；发布页的 0.3.1 安装包不含这些功能。需要试用可按下文「开发与构建」自行构建。各版本变化见 [更新说明](RELEASE_NOTES.md)。
 
 安装包目前未签名。请使用本仓库发布页的安装包，并与随附 `.sha256` 核对。安装器不会关闭或操作 Claude。升级前请关闭本工具窗口。
 
