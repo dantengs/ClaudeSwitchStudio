@@ -43,7 +43,7 @@ fn email_map(ctx: &Context) -> BTreeMap<String, BTreeSet<String>> {
     out
 }
 
-fn third_root(ctx: &Context) -> PathBuf {
+pub(super) fn third_root(ctx: &Context) -> PathBuf {
     if ctx.fixture {
         ctx.app.parent().unwrap().join("desktop-3p")
     } else {
@@ -147,6 +147,12 @@ pub(super) fn enrich(ctx: &Context, mut state: Value) -> Result<Value> {
         } else {
             "尚未收录桌面版登录 · Claude Code 登录独立"
         });
+        let saved_label = match (saved, s(a, "SavedAt")) {
+            (true, "") => "已收录".to_owned(),
+            (true, at) => format!("收录于 {at}"),
+            _ => "未收录".to_owned(),
+        };
+        a["SavedLabel"] = json!(saved_label);
     }
     for row in state["Sessions"].as_array_mut().unwrap() {
         row["RootKey"] = json!("official");
@@ -236,7 +242,7 @@ pub(super) fn enrich(ctx: &Context, mut state: Value) -> Result<Value> {
     } else {
         provider_catalog(ctx).unwrap_or_else(|e| json!({"Providers":[],"Warning":e}))
     };
-    state["Backend"] = json!("Rust 0.2.1 · 本地共享池");
+    state["Backend"] = json!(format!("Rust {} · 本地共享池", env!("CARGO_PKG_VERSION")));
     Ok(state)
 }
 
@@ -362,6 +368,48 @@ fn provider_catalog(ctx: &Context) -> Result<Value> {
     serde_json::from_slice(&output.stdout).map_err(err)
 }
 
+/// Read-only adapter catalogs (Codex accounts, Codex processes, MCP servers, skills).
+/// Test fixtures answer from data/<action>-fixture.json and never inspect the real machine.
+pub(super) fn adapter_catalog(ctx: &Context, action: &str) -> Result<Value> {
+    if ctx.fixture {
+        return Ok(opt_json(&ctx.data.join(format!("{action}-fixture.json"))));
+    }
+    let data = ctx.data.to_string_lossy().into_owned();
+    match action {
+        "codex-processes" => adapter(ctx, &["processes", "--app", "codex"]),
+        "codex-state" => adapter(ctx, &["codex-catalog", "--data-root", &data]),
+        "mcp-state" => adapter(ctx, &["mcp-catalog", "--data-root", &data]),
+        "skills-state" => adapter(ctx, &["skills-catalog", "--data-root", &data]),
+        "vendor-state" => adapter(ctx, &["vendor-catalog", "--data-root", &data]),
+        "cloud-state" => adapter(ctx, &["cloud-catalog", "--data-root", &data]),
+        _ => Err("未知的只读目录。".into()),
+    }
+}
+
+/// Runs a local_adapter.py subcommand that prints one JSON object (with "Error" on failure).
+pub(super) fn adapter(ctx: &Context, args: &[&str]) -> Result<Value> {
+    let base = ctx.data.parent().ok_or("无效的应用目录")?;
+    let output = command_hidden(python_path(base)?.to_str().ok_or("Python 路径无效")?)
+        .arg(base.join("local_adapter.py"))
+        .args(args)
+        .output()
+        .map_err(err)?;
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| "无法读取 Claude 进程信息，未修改任何文件。".to_owned())?;
+    if !output.status.success() {
+        let message = s(&value, "Error");
+        return Err(if message.is_empty() { "本地适配器未完成，未修改任何文件。".into() } else { message.into() });
+    }
+    Ok(value)
+}
+
+pub(super) fn claude_processes(ctx: &Context) -> Result<Value> {
+    if ctx.fixture {
+        return Ok(opt_json(&ctx.data.join("process-fixture.json")));
+    }
+    adapter(ctx, &["processes"])
+}
+
 pub(super) fn sharing_plan(ctx: &Context) -> Result<Value> {
     let state = ctx.state()?;
     let mut leaves = vec![];
@@ -461,7 +509,11 @@ mod tests {
             &json!({"lastKnownAccountUuid":b,"oauth:tokenCacheV2":"encrypted-fixture"}),
         )
         .unwrap();
-        write_json(&profile.join("studio-profile.json"), &json!({"Account":b})).unwrap();
+        write_json(
+            &profile.join("studio-profile.json"),
+            &json!({"Account":b,"SavedAt":"20261028-174826-644930"}),
+        )
+        .unwrap();
         let state = ctx.state().unwrap();
         let saved = state["Accounts"]
             .as_array()
@@ -470,6 +522,12 @@ mod tests {
             .find(|v| s(v, "Uuid") == b)
             .unwrap();
         assert_eq!(saved["PrimaryAction"], "switch");
+        assert_eq!(saved["SavedLabel"], "收录于 2026-10-28 17:48");
+        assert_eq!(
+            claude_processes(&ctx).unwrap(),
+            Value::Null,
+            "fixture mode must not inspect real processes"
+        );
         write_json(
             &ctx.app.join("claude_desktop_config.json"),
             &json!({"deploymentMode":"3p"}),

@@ -8,32 +8,60 @@ td,th{text-align:left;padding:12px;border-bottom:1px solid #76829555}th{font-wei
 <h2>1. 安装与首次启动</h2>
 <p>下载仓库 Releases 中的 EXE 安装包。安装器可选择目录，创建桌面及开始菜单入口，并提供卸载功能。默认优先 D 盘，未找到 D 盘时安装到当前用户的程序目录。安装无需退出 Claude；升级前关闭本工具即可。</p>
 <p>首次打开会出现三步指引。可以向前、向后查看，或选择稍后再看；设置中可重新打开。主题和字号与引导状态分别保存，升级不会用安装包里的样例偏好覆盖你的设置。</p>
-<p>界面可以在 Claude 工作时只读查看。点击收录、恢复登录或切换提供商时，才会明确提示先结束工作并退出 Claude。工具不强制结束进程。</p>
+<p>界面可以在 Claude 工作时只读查看。点击收录、添加账号、切换账号或切换提供商时，工具先检测 Claude Desktop 是否在运行：在运行时，确认窗口会列出进程数量，确认后才自动退出 Claude，完成后重新打开；未运行时直接执行并打开 Claude。取消则什么都不改。独立运行的 Claude Code 命令行不会被关闭，也不影响账号操作。</p>
 <h2>2. 认识账号卡片</h2>
-<table><tr><th>按钮</th><th>含义</th></tr><tr><td>添加登录</td><td>发现历史账号，但还没有可用的桌面登录快照</td></tr><tr><td>收录当前登录</td><td>当前官方桌面身份尚未收录</td></tr><tr><td>更新登录状态</td><td>当前账号已有快照，可以保存最新本地状态</td></tr><tr><td>切换账号</td><td>其他账号已有快照，可以在退出 Claude 后尝试恢复</td></tr></table>
+<table><tr><th>按钮</th><th>含义</th></tr><tr><td>添加登录</td><td>发现历史账号，但还没有可用的桌面登录快照；打开“添加账号”流程</td></tr><tr><td>收录当前登录</td><td>当前官方桌面身份尚未收录</td></tr><tr><td>更新登录状态</td><td>当前账号已有快照，可以保存最新本地状态</td></tr><tr><td>切换账号</td><td>其他账号已有快照，可以一键恢复；需要时自动退出并重新打开 Claude</td></tr></table>
+<p>卡片按两列排列，当前桌面身份带高亮边框，标签显示快照收录时间。页面顶部的“添加账号”与卡片上的“添加登录”进入同一流程。</p>
 <p>邮箱来自 UUID 精确匹配的本地记录或用户确认的对应关系，界面会注明来源。显示名称和邮箱都不是远端身份验证结果。可以起别名，完整邮箱也可以直接作为显示名；内部目录按账号 UUID 生成。</p>
 <h2>3. 收录与切换官方账号</h2>
 <p>这是未经官方支持的实验功能。启用前请阅读 README 中的账号风险说明，避免使用不可接受损失的重要账号做试验。</p>
-<p>在官方 Claude Desktop 自行登录一个账号，完成任务后从系统托盘完全退出。结束 Claude Code 和第三方版。回到本工具点击“收录当前登录”，核对对象后继续。工具会检查当前 UUID 与卡片是否一致，检查本地缓存，先做时间戳备份，再创建受保护的快照。</p>
-<p>添加第二个账号时，会提醒先保留当前尚未收录的身份。自行在官方客户端完成第二个账号登录，退出后再收录。官方退出登录可能撤销先前凭证；工具不能保证旧快照仍有效。</p>
-<p>两个账号有快照后，退出 Claude，选择目标卡片的“切换账号”。工具会保存当前官方账号的最新状态，避免旧快照遗漏刷新后的令牌，再恢复目标文件。实际能否登录请自行打开 Claude 确认；失效时重新通过官方客户端登录并收录。</p>
+<p>在官方 Claude Desktop 自行登录一个账号，回到本工具点击“收录当前登录”，核对显示名称后确认。工具会检查当前 UUID 与卡片是否一致，检查本地缓存，先做时间戳备份，再创建受保护的快照。</p>
+<p><strong>添加更多账号。</strong> 点“添加账号”。Claude Desktop 不向第三方开放登录授权，所以和 Antigravity Tools 用 OAuth 直接添加不同，新账号在 Claude 自己的登录页登录：</p>
+<ol><li>工具收录当前账号的最新登录状态；</li><li>把 <code>Network</code>、<code>Local Storage</code>、<code>Session Storage</code> 和 <code>config.json</code> 中的登录字段移入时间戳备份，其他 Desktop 设置保留。这一步不在服务器上注销，已保存的账号仍可切回；</li><li>重新打开 Claude，此时显示登录页，你登录要添加的账号；</li><li>回到本工具点“收录当前登录”。</li></ol>
+<p>换号请用本工具，不要用 Claude 菜单里的“退出登录”：服务器端注销可能撤销先前凭证，工具不能保证旧快照仍有效。</p>
+<p><strong>切换。</strong> 选择目标卡片的“切换账号”。工具先在不改动文件的情况下核对目标快照；若 Claude 在运行，确认窗口提示进程数量并说明进行中的回复与 Desktop 内的 Claude Code 任务会被中断。确认后：退出 Claude（先正常关闭，几秒内未退出再结束 Desktop 进程树）→ 保存当前官方账号的最新状态，避免旧快照遗漏刷新后的令牌 → 恢复目标文件 → 重新打开 Claude。实际能否登录请在 Claude 中确认；失效时重新登录并收录。</p>
+<p>若操作失败而原登录文件已完整保留或还原，工具按原状态重新打开 Claude；若事务需要人工核对，Claude 保持关闭，以免新写入覆盖待核对的文件。</p>
 <p>只打开终端版 Claude Code 并不会建立 Desktop 登录。两者的认证文件和登录流程独立。</p>
-<h2>4. 第三方提供商</h2>
-<p>程序只读识别当前用户已有的 CC Switch 桌面提供商配置，不包含 CC Switch 本身，也不提供第三方账号注册。请先在原工具中配置端点与自己的 API 凭证，再在此工具刷新。</p>
-<p>选择提供商前，退出 Claude。工具会按时间备份配置，切换本地官方/第三方模式；官方订阅令牌不会作为第三方 API 凭证使用。某些模型映射需要本工具的本地转发器保持运行，端点由用户的提供商配置决定。使用哪个提供商，费用和隐私规则就由该提供商约束。</p>
-<h2>5. 共享池、记忆与用量</h2>
+<h2>4. 接入表与第三方账号</h2>
+<p>「账号管理」页顶部的<strong>接入表</strong>决定每个应用用哪个来源，三行分别是 Claude Desktop（聊天界面）、Claude Code（命令行和 Desktop 里的 Code，共用 <code>~/.claude/settings.json</code>）和 Codex（应用和命令行，共用 <code>~/.codex/config.toml</code>）。每个应用同一时间只用一个来源：在下拉框里选官方账号或第三方账号，必要时选模型，点「使用」。</p>
+<p>- <strong>Claude Desktop</strong>：选官方账号就是切换账号；选第三方账号会切换到第三方模式（与切换账号一样先检测并在确认后退出、重新打开 Claude），当前官方账号的登录会先保存。选回任一官方账号即可切回。 - <strong>Claude Code</strong>：写入 <code>settings.json</code> 的 <code>env</code>（地址、Key、默认模型和 Opus / Sonnet / Haiku 三档模型）。新开的会话立即生效；已经打开的会话仍用原设置，不会被关闭。选「官方登录（接入前的设置）」会原样恢复接入前的内容。 - <strong>Codex</strong>：和 CC Switch 一样以 API Key 方式接入：在 <code>config.toml</code> 中加入「&lt;名称&gt;（第三方）」模型提供方（Responses 接口）并设为默认，Key 写在这个提供方里，ChatGPT 登录（<code>auth.json</code>）保持不变；需要退出并重新打开 Codex。选回官方账号会恢复接入前的提供方和模型，必要时同时切换 Codex 账号。</p>
+<p>每次修改前按时间备份原文件，切回时原样恢复。下拉框里的灰色选项表示该账号没有对应的接口：Claude Desktop 和 Claude Code 需要 Anthropic 兼容接口；Codex 需要「Codex 接口」（OpenAI Responses 接口）。预设中 DeepSeek、Kimi For Coding 和 Antigravity Tools 带有 Codex 接口，其他厂商如果提供了 Responses 接口，可以在账号里自行填写。</p>
+<p><strong>第三方账号</strong>按厂商自动分组，预设包括 DeepSeek、Kimi、智谱 GLM、通义千问（阿里云百炼）、MiniMax、OpenRouter、Google Gemini API、Antigravity Tools（本机代理）和自定义。添加时选择厂商，地址自动填写（可修改），粘贴 API Key 后点「检测可用模型」：工具用这个 Key 读取厂商的模型列表，选一个作为默认模型。预设地址来自各厂商公开文档，可能随厂商调整，以检测结果为准。</p>
+<p>- API Key 用 Windows 数据保护（DPAPI）加密后保存在 <code>data/vendors.json</code>，只有当前 Windows 用户能解开；界面和日志不显示完整 Key。接入 Claude Code 或 Codex 时，Key 会按这些应用的要求以明文写入它们自己的配置文件。 - Antigravity Tools 预设可以勾选「使用 Antigravity Tools 本地代理的密钥」：每次接入时从 Antigravity Tools 读取代理密钥，不保存到本工具，也不读取 Google 登录令牌。需要 Antigravity Tools 的 API 代理保持运行；号池调度由 Antigravity Tools 自己完成。 - 「从 CC Switch 导入」只读读取 CC Switch 中 Claude 和 Codex 的提供商（地址、Key、模型），加密保存为本工具的账号；同一个 Key 的 Claude 与 Codex 配置合并为一个账号，Antigravity Tools 的代理密钥改为接入时读取。不会修改 CC Switch，已导入的会跳过。 - 正在被某个应用使用的账号不能删除，请先在接入表中换成其他来源。</p>
+<p>本工具不做号池或请求转发：需要号池时，可以把 Antigravity Tools、CC Switch 等工具的本地代理作为一个自定义账号接入。官方订阅登录不会作为第三方 API 凭证使用。使用哪个提供商，费用和隐私规则就由该提供商约束。</p>
+<h2>5. 托盘、启动与对话同步</h2>
+<p>点窗口右上角 × 时，程序最小化到系统托盘，并不会退出；只有在托盘图标右键菜单中选择「退出 Claude Switch Studio」才会真正退出。右键菜单还可以打开主界面、切换到其他已收录账号、添加账号、打开 Claude、刷新状态和开关开机自启。托盘提示文字显示当前账号，在后台完成的操作会弹出通知。再次双击程序图标会唤出已有窗口。这些选项都在「设置与关于 → 启动与托盘」里。</p>
+<p>Claude Desktop 给每个账号单独保存一份对话列表（每条对话一个索引文件），对话原文则都在本机的 <code>%USERPROFILE%\.claude\projects</code> 中共享。开启「切换账号时自动同步对话列表」后（默认开启），每次切换时工具在 Claude 退出期间，把各官方账号缺少的对话互相补到对方列表里：A 账号新建的对话，切到 B 后也能看到，反之亦然。也可以在「共享对话池」页点「同步到所有账号」手动同步。同步只新增缺少的条目，不覆盖、不删除；在某个账号删除过的对话不会被加回该账号；本机没有原文的条目不会同步。复制到其他账号时会去掉原账号专属的远程桥接、计划任务和连接器设置。每次新增的文件都记录在 <code>data/conversation-sync/</code>。第三方工作区暂不参与同步。</p>
+<h2>6. 用量统计</h2>
+<p>「用量统计」页类似 CC Switch：可选今日、近 7 天、近 30 天或全部记录，显示总 Token、输入/输出、缓存读取/写入与命中率、估算费用，并按账号、按模型和按日期分开统计。数据来自本机对话文件；同一次请求在文件里会按内容块重复记录，工具按消息与请求 ID 只计一次。</p>
+<p>每个请求归到它发生时正在使用的账号：工具记录每次切换、收录和切换提供商的时间（<code>data/account-timeline.json</code>，并参考已有的切换记录）；早于任何记录的请求归到对话所属账号。在 Claude 内自行换号的时段无法区分。终端里独立运行的 Claude Code 单独列为一行。若对话文件记录过限额提示（如 5 小时额度），账号行会显示最近一次的状态与重置时间。</p>
+<p>费用按 Anthropic 官方 API 价格折算：程序内置一份官方价格表，打开统计页时若本地价格超过 7 天会自动从官方价格页（<code>platform.claude.com/docs/en/about-claude/pricing</code>）重新读取，也可以点「更新官方价格」立即更新；读取失败时继续使用上一份价格。计算区分 5 分钟与 1 小时缓存写入、各模型的缓存读取倍率、快速模式、Haiku 5.5 长提示档位和仅美国推理的 1.1 倍。「自定义价格」可按你的实际账单覆盖某些模型。这是等价金额，不是账单；Pro/Max 订阅不按 token 计费。</p>
+<p>时间范围还包括「近 24 小时」：从当前时刻往前滚动 24 小时，趋势按小时显示。左侧下拉框可在 Claude 与 Codex 之间切换。Codex 的会话记录自带创建它的账号，所以按账号统计是准确的；同一次回复按 <code>response_id</code> 只计一次，OpenAI 的 <code>input_tokens</code> 已含缓存读取，这里拆开显示。Codex 的费用按 OpenAI 官方价格页（<code>developers.openai.com/api/docs/pricing</code>）的 Standard 价格折算：程序内置一份，超过 7 天自动更新，也可点「更新官方价格」；超过 272K 输入 token 的请求按长上下文价格，缓存写入按 30 分钟价格；没有公开价格的模型（如 codex-auto-review）不计入，金额后带「+」。趋势图是横向时间轴，放在费用卡片下方，最早的在左，峰值标为橙色。</p>
+<h2>7. Codex 账号</h2>
+<p>「账号管理」页的「Codex 官方账号」部分像 Antigravity Tools 一样管理多个 Codex（ChatGPT 登录）账号。Codex 的登录在 <code>~/.codex/auth.json</code>，工具为每个账号在 <code>%USERPROFILE%\.codex-profiles\&lt;账号 ID&gt;\</code> 保存一份快照（仅当前 Windows 用户可读）。卡片显示邮箱、套餐、是否当前登录、收录时间，以及该账号最近一次的额度（例如每周额度已用百分比和重置时间，来自 Codex 会话记录）。</p>
+<p>- <strong>收录当前登录</strong>：保存当前登录的快照，执行前按时间备份；只读取文件，Codex 可以继续运行。 - <strong>切换账号</strong>：检测 Codex 是否在运行，确认后自动退出，先保存当前账号的最新登录，再换成目标账号并重新打开。会话记录本来就在 <code>~/.codex/sessions</code> 共享，不需要同步。 - <strong>添加账号</strong>：像 Antigravity Tools 的 OAuth 一样在后台完成。工具在一个临时目录里运行 Codex 自带的官方 <code>codex login</code>，浏览器打开 OpenAI 官方登录页；你登录授权后，账号自动加入列表。正在使用的 Codex 不退出、不切换，<code>~/.codex/auth.json</code> 也不改动。等待期间可以复制登录链接或取消；10 分钟未完成会自动取消。</p>
+<p>独立运行的 Codex 命令行（不是 Codex 桌面版启动的）可能在刷新登录时改写 <code>auth.json</code>，所以切换前需要先结束它们；工具不会自动关闭它们。托盘菜单也有「切换 Codex 账号」。Codex 接入第三方账号见第 4 节。API Key 登录方式不收录。</p>
+<p>用量统计中选择「Antigravity」可查看 Antigravity Tools 记录的代理请求：Gemini 按 Google 官方 Gemini API 价格页（<code>ai.google.dev/gemini-api/docs/pricing</code>）的付费 Standard 价格折算，按请求当天适用的价格计算，超过 200K 的提示按长上下文价格；经它转发的 Claude 模型按 Anthropic 官方价格；没有公开价格的模型不计入，金额后带「+」。</p>
+<h2>8. MCP 与技能</h2>
+<p>「MCP 与技能」页参考 CC Switch，为每个 MCP 服务和技能提供「Claude Code」「Codex」两个开关。勾选即在对应应用中开启，取消即关闭，重新启动该应用后生效。</p>
+<p>- MCP：Claude Code 读取 <code>~/.claude.json</code> 的 <code>mcpServers</code>，Codex 读取 <code>~/.codex/config.toml</code> 的 <code>[mcp_servers.*]</code>。在另一个应用中开启时自动转换格式（命令行服务和 HTTP 服务）。关闭时原配置保存在 <code>data/mcp-library.json</code>，重新开启时原样恢复。修改 <code>config.toml</code> 时只改动该服务的表，前后解析比对确认其他设置完全不变，否则不写入；使用内联表等无法安全修改的写法会被拒绝。 - 技能：<code>~/.claude/skills</code> 与 <code>~/.codex/skills</code> 下的文件夹。开启时从另一应用或技能库复制并校验；关闭前先把副本保存到 <code>data/skills-library</code> 并在时间戳备份中再存一份，校验通过后才移除。Codex 自带的 <code>.system</code>、<code>_shared</code> 不列出。两边内容不一致的技能会标出。</p>
+<p>每个列表右上角有「Claude Code 全选」「Codex 全选」：未全部勾选时一键全部开启，已全部勾选时变为「全不选」，一键全部关闭；执行前会确认数量，单项失败不影响其他项。每次修改前都会备份原文件。若同时用 CC Switch 管理 MCP 和技能，请只在一处修改，以免两个工具互相覆盖。</p>
+<h2>9. 共享池、记忆与用量</h2>
 <p>共享池从多个账号的本地索引汇总对话，同一份原文只展示一次；不同分支会保留。可以按来源筛选或搜索。未注册原文放在单独分类供核对。</p>
 <p>当前版本提供统一浏览视图，不自动把所有账号索引链接到同一目录，也不保证每个 Claude 原生侧栏都显示同样的条目。“共享方案预览”仅检查计划，不移动数据或创建联接。</p>
 <p>项目记忆保留在 Claude 的本地项目目录。工具展示位置与文件数量，不把账号登录状态写进记忆。历史缓存/用量来自已有记录，不能据此保证后续对话能沿用服务端缓存。</p>
-<h2>6. 备份与故障</h2>
-<p>普通完整会话备份包含索引、原文、记忆与相关状态，ZIP 和清单逐文件校验。认证操作另建 <code>data/private-auth-backups/&lt;时间戳-用途&gt;/</code>，其中包含敏感登录文件，请勿分享。</p>
+<h2>10. 备份与故障</h2>
+<p><strong>云备份（WebDAV）</strong>：在「备份中心」填写 WebDAV 地址、用户名、密码（坚果云等请使用「应用密码」）和加密密码，选择备份保存到「仅本机」「仅 WebDAV」或「本机和 WebDAV 都保存」。工具在 WebDAV 上自动创建远程文件夹（默认 <code>ClaudeSwitchStudio</code>）。</p>
+<p>- 每个文件在本机加密后再上传（AES-256 加 HMAC-SHA256，密钥由加密密码经 PBKDF2 派生），云端只有密文；忘记加密密码将无法恢复。WebDAV 密码和加密密码用 Windows 数据保护保存在本机。 - 创建完整备份后，若选择了 WebDAV，会自动上传这份备份和一份设置备份（第三方账号与偏好设置）；选择「仅 WebDAV」时，上传成功后本机副本移到回收站。也可以在备份卡片上点「上传到云端」，或点「立即上传设置」。 - 每台电脑、每种备份在云端保留最近若干份（默认 10），更早的自动删除。Claude 登录快照不上传：它们和本机的系统加密绑定，换电脑也无法使用。 - 「查看云端备份」列出云端文件，可「恢复到本机」：设置备份只补充本机还没有的第三方账号（Key 用本机的 Windows 数据保护重新加密），会话备份放回本机的备份中心；本机已有的内容不会被覆盖。加密密码不对或文件被改动时直接拒绝。 - 开启「启动时检查」后，打开程序时若发现其他电脑上传了更新的备份，会提示你去恢复，不会自动覆盖本地。</p>
+<p>普通完整会话备份包含索引、原文、记忆与相关状态，ZIP 和清单逐文件校验。创建时可以命名（默认「新增备份 N」），之后可重命名；删除会把备份移到 Windows 回收站。认证操作另建 <code>data/private-auth-backups/&lt;时间戳-用途&gt;/</code>，其中包含敏感登录文件，请勿分享。</p>
 <p>Windows 当前用户的 <code>.claude-profiles/</code> 保存登录快照和公共操作记录；新版本的认证操作共用文件锁。旧版不认识新的公共锁，请避免在旧、新工具窗口同时操作账号。</p>
 <p>如果提示未完成事务，先停止后续切换，保留原文件、隐藏的暂存目录和对应时间戳备份。不要删记录强行重试。认证恢复涉及多个文件及账号/组织状态，应核对清单并由熟悉该客户端版本的人处理。普通会话撤销只适用于本工具记录、校验仍一致的操作。</p>
 <p>升级保留运行后产生的 <code>data/</code>。卸载只移除安装文件和入口，不删除会话、记忆、账号快照或用户备份。如果要清理敏感数据，应先自行确认备份需求并在官方客户端处理登录撤销。</p>
-<h2>7. 常见问题</h2>
+<h2>11. 常见问题</h2>
 <p><strong>为什么有邮箱却不能直接切换？</strong> 邮箱和历史记录只是账号线索，需要该账号的桌面登录快照。</p>
 <p><strong>为什么打开 Claude Code 仍无法收录？</strong> 工具收录的是 Desktop 本地状态，请在 Claude Desktop 登录。</p>
 <p><strong>为什么恢复后要求重新登录？</strong> 可能过期、撤销、登出、令牌轮换或版本变化。文件完整不代表远端授权有效。</p>
-<p><strong>可以直接在工具里 OAuth 添加多个官方账号吗？</strong> 当前没有。CC Switch 的官方多账号流程委托官方 CLI；不能据此推断 Desktop 也提供同样接口。</p>
+<p><strong>Claude Desktop 能像 Codex 一样在后台授权添加账号吗？</strong> 不能。Codex 有官方命令行 <code>codex login</code>，可以把登录写进指定目录，工具只是在后台调用它。Claude Desktop 的登录由客户端自己完成，令牌用 Windows 加密保存在它的数据目录里，没有可以把新登录写到别处的官方命令；Claude Code 的 <code>claude</code> 命令行登录也只用于命令行，不能变成 Desktop 登录。Anthropic 的规则还限制第三方应用提供 Claude.ai 登录，所以这里不自建登录。Desktop 只能在客户端里登录，再由本工具收录。</p>
+<p><strong>切换时会关掉我在终端里运行的 Claude Code 吗？</strong> 不会。只有 Claude Desktop 及其启动的 Claude Code 任务会被退出；从终端独立启动的会话按父进程识别并保留。</p>
 <p><strong>会不会封号？</strong> 无法给出可信概率或保证。只在本地保存不代表已获服务提供方许可；请以官方条款及自己的风险接受程度决定。</p>
 <p><strong>为什么 Windows 提示未知发布者？</strong> 当前版本没有商业代码签名证书。请核对仓库发布来源与 SHA-256；若不信任，先审查源码自行构建。</p></article></html>

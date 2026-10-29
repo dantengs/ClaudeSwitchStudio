@@ -3,10 +3,12 @@
     [string]$PayloadDir=(Join-Path (Split-Path $PSScriptRoot -Parent) 'packaging\payload'),
     [string]$OutputDir=(Join-Path (Split-Path $PSScriptRoot -Parent) 'dist'),
     [string]$ChineseLanguageFile='',
-    [string]$Version='0.3.1'
+    [string]$Version='0.4.0-preview'
 )
 $ErrorActionPreference='Stop'
-if($Version -notmatch '^\d+\.\d+\.\d+$'){throw 'Invalid release version.'}
+# An optional lowercase suffix marks local preview builds; Windows file versions stay numeric.
+if($Version -notmatch '^(\d+\.\d+\.\d+)(-[a-z0-9]+)?$'){throw 'Invalid release version.'}
+$numericVersion=$Matches[1]
 if(-not(Test-Path -LiteralPath $Compiler -PathType Leaf)){throw 'Inno Setup compiler not found. Pass -Compiler with the verified ISCC.exe path.'}
 $compilerPath=(Resolve-Path -LiteralPath $Compiler).Path
 $payloadRoot=(Resolve-Path -LiteralPath $PayloadDir).Path.TrimEnd('\')
@@ -45,7 +47,7 @@ if(Test-Path -LiteralPath $expectedInstaller){throw 'Installer output already ex
 $manifest=[ordered]@{Version=$Version;CreatedAt=[DateTimeOffset]::Now.ToString('o');PrivateRuntimeIncluded=$false;Files=@($files.ToArray()|Sort-Object Path)}
 $manifestPath=Join-Path $outputRoot ('payload-'+$Version+'-manifest.json')
 [IO.File]::WriteAllText($manifestPath,($manifest|ConvertTo-Json -Depth 8),(New-Object Text.UTF8Encoding($false)))
-& $compilerPath ('/DAppVersion='+$Version) ('/DPayloadDir='+$payloadRoot) ('/DBuildOutputDir='+$outputRoot) ('/DChineseLanguageFile='+$ChineseLanguageFile) (Join-Path $PSScriptRoot 'Studio.iss')
+& $compilerPath ('/DAppVersion='+$Version) ('/DNumericVersion='+$numericVersion) ('/DPayloadDir='+$payloadRoot) ('/DBuildOutputDir='+$outputRoot) ('/DChineseLanguageFile='+$ChineseLanguageFile) (Join-Path $PSScriptRoot 'Studio.iss')
 if($LASTEXITCODE -ne 0 -or -not(Test-Path -LiteralPath $expectedInstaller)){throw 'Installer compilation failed.'}
 foreach($file in $files){if((Get-FileHash -LiteralPath (Join-Path $payloadRoot $file.Path) -Algorithm SHA256).Hash -ne $file.Sha256){throw ('Payload changed during compilation: '+$file.Path)}}
 $hash=(Get-FileHash -LiteralPath $expectedInstaller -Algorithm SHA256).Hash

@@ -1,3 +1,4 @@
+mod usage;
 mod workspace;
 // Rust local workspace core. Live mutations require an explicitly confirmed maintenance window.
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
@@ -142,6 +143,22 @@ fn name(p: &Path) -> String {
         .to_string_lossy()
         .into_owned()
 }
+fn checked_title(v: &str) -> Result<String> {
+    let v = v.trim();
+    if v.is_empty() || v.chars().count() > 60 || v.chars().any(char::is_control) {
+        return Err("备份名称须为 1–60 个单行字符。".into());
+    }
+    Ok(v.to_owned())
+}
+/// "新增备份 N", one past the highest number already used, so deletions never reuse a name.
+fn next_backup_name(backups: &[Value]) -> String {
+    let used = backups
+        .iter()
+        .filter_map(|b| s(b, "Name").strip_prefix("新增备份 ")?.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0);
+    format!("新增备份 {}", used + 1)
+}
 fn command_hidden(program: &str) -> Command {
     let mut c = Command::new(program);
     #[cfg(windows)]
@@ -276,9 +293,23 @@ impl Context {
                 .trim_matches('\u{feff}')
                 .trim()
                 .to_owned();
+            // The adapter stamps snapshots as YYYYMMDD-HHMMSS-micros in Beijing time.
+            let stamp = s(&metadata, "SavedAt");
+            let saved_at = if stamp.len() >= 15 && stamp.is_char_boundary(15) {
+                format!(
+                    "{}-{}-{} {}:{}",
+                    &stamp[0..4],
+                    &stamp[4..6],
+                    &stamp[6..8],
+                    &stamp[9..11],
+                    &stamp[11..13]
+                )
+            } else {
+                String::new()
+            };
             map.insert(
                 id.into(),
-                json!({"Name":n,"Label":label,"Complete":complete}),
+                json!({"Name":n,"Label":label,"Complete":complete,"SavedAt":saved_at}),
             );
         }
         Ok(map)
@@ -341,7 +372,7 @@ impl Context {
             }
             let current = id == live;
             let saved = profile["Complete"].as_bool().unwrap_or(false);
-            accounts.push(json!({"Uuid":id,"Short":short(&id),"Name":label,"HasCustomName":custom_name,"Initial":label.chars().next().map(|c|c.to_string()).unwrap_or_default(),"Sessions":count,"Organizations":orgs,"IsCurrent":current,"Profile":s(&profile,"Name"),"Saved":saved,"CanSwitch":saved&&!current,"Status":if current{"当前账号"}else if saved{"可切换"}else{"待保存登录"},"ProfileStatus":if saved{"已保存登录状态"}else{"发现本地会话 · 尚未保存登录"},"CurrentVisibility":if current{"Visible"}else{"Collapsed"}}));
+            accounts.push(json!({"Uuid":id,"Short":short(&id),"Name":label,"HasCustomName":custom_name,"Initial":label.chars().next().map(|c|c.to_string()).unwrap_or_default(),"Sessions":count,"Organizations":orgs,"IsCurrent":current,"Profile":s(&profile,"Name"),"Saved":saved,"SavedAt":s(&profile,"SavedAt"),"CanSwitch":saved&&!current,"Status":if current{"当前账号"}else if saved{"可切换"}else{"待保存登录"},"ProfileStatus":if saved{"已保存登录状态"}else{"发现本地会话 · 尚未保存登录"},"CurrentVisibility":if current{"Visible"}else{"Collapsed"}}));
         }
         sessions.sort_by_key(|x| std::cmp::Reverse(x["LastAt"].as_i64().unwrap_or(0)));
         let mut backups = vec![];
@@ -354,10 +385,11 @@ impl Context {
                 .map(|x| format!("{:.1} MB", x.len() as f64 / 1048576.0))
                 .unwrap_or_else(|_| "缺失".into());
             let undone = m["Undone"].as_bool().unwrap_or(false);
-            backups.push(json!({"Id":name(&dir),"Time":m["Time"],"Files":m["Files"].as_array().map(|x|x.len()).unwrap_or(0),"Size":size,"Reason":m["Reason"],"Path":dir,"CanUndo":m["Created"].as_array().is_some_and(|a|!a.is_empty())&&!undone,"Status":if undone{"已撤回新增"}else{"校验通过"}}));
+            let title = if s(&m, "Name").is_empty() { s(&m, "Reason") } else { s(&m, "Name") };
+            backups.push(json!({"Id":name(&dir),"Time":m["Time"],"Files":m["Files"].as_array().map(|x|x.len()).unwrap_or(0),"Size":size,"Reason":m["Reason"],"Name":title,"Path":dir,"CanUndo":m["Created"].as_array().is_some_and(|a|!a.is_empty())&&!undone,"Status":if undone{"已撤回新增"}else{"校验通过"}}));
         }
         Ok(
-            json!({"Backend":"Rust 0.1","Live":live,"Accounts":accounts,"Sessions":sessions,"Targets":targets,"Backups":backups,"TranscriptCount":tx.len(),"Watcher":watcher_running(),"AppRoot":self.app,"Kernel":self.kernel}),
+            json!({"Backend":"Rust 0.1","Live":live,"Accounts":accounts,"Sessions":sessions,"Targets":targets,"NextBackupName":next_backup_name(&backups),"Backups":backups,"TranscriptCount":tx.len(),"Watcher":watcher_running(),"AppRoot":self.app,"Kernel":self.kernel}),
         )
     }
     fn state(&self) -> Result<Value> {
@@ -429,16 +461,11 @@ impl Context {
         if self.fixture {
             return Ok(());
         }
-        let output = command_hidden("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "if (Get-Process -Name claude -ErrorAction SilentlyContinue) { exit 10 }",
-            ])
-            .output()
-            .map_err(err)?;
-        if !output.status.success() {
-            return Err("请先从系统托盘完全退出 Claude；不会强制结束会话。".into());
+        // Same classification as the adapter: independent Claude Code CLI sessions do not block.
+        // A CLI writing a transcript mid-backup is still caught by the before/after hash checks.
+        let processes = workspace::claude_processes(self)?;
+        if processes["Blocking"].as_bool().unwrap_or(true) {
+            return Err("Claude Desktop 仍在运行。请在确认窗口中选择自动退出，或从系统托盘退出后重试。".into());
         }
         Ok(())
     }
@@ -489,7 +516,18 @@ impl Context {
         out.sort();
         Ok(out)
     }
-    fn backup(&self, reason: &str) -> Result<Value> {
+    fn backup_dir(&self, id: &str) -> Result<PathBuf> {
+        if id.len() != 22 || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+            return Err("备份标识无效。".into());
+        }
+        let dir = self.data.join("backups").join(id);
+        let meta = fs::symlink_metadata(&dir).map_err(|_| "备份已不存在，请刷新。".to_owned())?;
+        if !meta.is_dir() || !dir.join("manifest.json").is_file() {
+            return Err("这不是本工具创建的备份目录，已停止。".into());
+        }
+        Ok(dir)
+    }
+    fn backup(&self, reason: &str, title: &str) -> Result<Value> {
         self.assert_closed()?;
         let id = format!(
             "{}-{:06x}",
@@ -533,7 +571,7 @@ impl Context {
         drop(z);
         write_json(
             &dir.join("manifest.json"),
-            &json!({"Id":id,"Time":local_now().format("%Y-%m-%d %H:%M").to_string(),"Reason":reason,"Files":records,"Created":[],"Undone":false,"ArchiveSha256":hash(&archive)?}),
+            &json!({"Id":id,"Time":local_now().format("%Y-%m-%d %H:%M").to_string(),"Reason":reason,"Name":title,"Files":records,"Created":[],"Undone":false,"ArchiveSha256":hash(&archive)?}),
         )?;
         Ok(json!({"Id":id,"Path":dir,"Files":records.len(),"Verified":true}))
     }
@@ -583,7 +621,7 @@ impl Context {
                 json!({"Copied":0,"Skipped":skip,"Message":"所选会话已存在，无需重复迁移。"}),
             );
         }
-        let backup = self.backup(&format!("迁移前备份 · {} 条", plan.len()))?;
+        let backup = self.backup(&format!("迁移前备份 · {} 条", plan.len()), "")?;
         self.assert_closed()?;
         let mp = PathBuf::from(s(&backup, "Path")).join("manifest.json");
         let mut manifest = read_json(&mp)?;
@@ -679,8 +717,68 @@ impl Context {
         match s(r, "Action") {
             "state" => self.state(),
             "workspace-plan" => workspace::sharing_plan(self),
+            "claude-processes" => workspace::claude_processes(self),
+            "codex-processes" | "codex-state" | "mcp-state" | "skills-state" | "vendor-state" | "cloud-state" => {
+                workspace::adapter_catalog(self, s(r, "Action"))
+            }
+            // Antigravity usage comes from Antigravity Tools' own SQLite records, read by the adapter.
+            "usage-stats" if s(r, "App") == "antigravity" && !self.fixture => {
+                let data = self.data.to_string_lossy().into_owned();
+                workspace::adapter(self, &["agy-usage", "--data-root", &data, "--target", &r.to_string()])
+            }
+            "usage-stats" => usage::usage_stats(self, r),
             "usage" => self.usage(r),
-            "backup" => self.backup("完整备份"),
+            "backup" => {
+                // The shared confirmation dialog sends its text field as DisplayName.
+                let given = if s(r, "Name").trim().is_empty() { s(r, "DisplayName") } else { s(r, "Name") };
+                let title = match given.trim() {
+                    "" => next_backup_name(self.state_base()?["Backups"].as_array().unwrap()),
+                    given => checked_title(given)?,
+                };
+                // Only after the user confirmed the exit dialog; Claude is reopened only if it was running.
+                let target = if r["QuitClaude"] == true && !self.fixture {
+                    workspace::adapter(self, &["quit"])?["Target"].clone()
+                } else {
+                    Value::Null
+                };
+                let outcome = self.backup("完整备份", &title);
+                let reopened = !target.is_null()
+                    && workspace::adapter(self, &["launch", "--target", &target.to_string()]).is_ok();
+                let mut done = outcome?;
+                done["Message"] = json!(format!(
+                    "备份「{title}」已完成，{} 个文件逐一校验通过。{}",
+                    done["Files"],
+                    if reopened { "已自动重新打开 Claude。" } else if target.is_null() { "" } else { "请手动打开 Claude。" }
+                ));
+                Ok(done)
+            }
+            "backup-rename" => {
+                let dir = self.backup_dir(s(r, "Id"))?;
+                let mut manifest = read_json(&dir.join("manifest.json"))?;
+                manifest["Name"] = json!(checked_title(s(r, "Name"))?);
+                write_json(&dir.join("manifest.json"), &manifest)?;
+                Ok(json!("备份名称已更新。"))
+            }
+            "backup-delete" => {
+                let dir = self.backup_dir(s(r, "Id"))?;
+                files(&dir)?; // Refuses links anywhere inside before anything is moved.
+                if self.fixture {
+                    fs::remove_dir_all(&dir).map_err(err)?;
+                } else {
+                    // The Recycle Bin keeps a deleted backup recoverable; the path travels in the
+                    // environment so it is never parsed as PowerShell code.
+                    let status = command_hidden("powershell.exe")
+                        .args(["-NoProfile", "-NonInteractive", "-Command",
+                            "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:STUDIO_BACKUP_PATH,'OnlyErrorDialogs','SendToRecycleBin')"])
+                        .env("STUDIO_BACKUP_PATH", &dir)
+                        .status()
+                        .map_err(err)?;
+                    if !status.success() || dir.exists() {
+                        return Err("未能把备份移到回收站，备份仍保留在原位置。".into());
+                    }
+                }
+                Ok(json!("备份已移到回收站，可从回收站还原。"))
+            }
             "copy" => self.copy(r),
             "undo" => self.undo(s(r, "Id")),
             "label" => {
@@ -735,21 +833,24 @@ fn run() -> Result<()> {
         )?;
         return Ok(());
     }
-    if ["save", "switch", "provider-switch"].contains(&s(&r, "Action")) {
+    if ["save", "switch", "provider-switch", "login-new", "sync-conversations", "codex-save", "codex-switch",
+        "codex-login-new", "mcp-toggle", "skill-toggle", "mcp-bulk", "skill-bulk", "codex-oauth-start",
+        "codex-oauth-status", "codex-oauth-cancel", "vendor-save", "vendor-delete", "vendor-models", "vendor-import",
+        "route-claude-code", "codex-route", "cloud-save", "cloud-list", "cloud-upload", "cloud-restore", "cloud-check"]
+        .contains(&s(&r, "Action"))
+    {
         if ctx.fixture {
             return Err("测试模式禁止账号操作。".into());
         }
         if r["MaintenanceConfirmed"] != true {
             write_json(
                 &response,
-                &json!({"Ok":false,"Error":"请先确认已退出 Claude；不会强制结束进程。"}),
+                &json!({"Ok":false,"Error":"请先确认退出 Claude 后再执行。"}),
             )?;
             return Ok(());
         }
-        if let Err(e) = ctx.assert_closed() {
-            write_json(&response, &json!({"Ok":false,"Error":e}))?;
-            return Ok(());
-        }
+        // The adapter owns the Desktop process check: it tells Desktop apart from independent
+        // Claude Code sessions and, only with the user's QuitClaude confirmation, closes Desktop.
         fs::create_dir_all(&ctx.data).map_err(err)?;
         let lock = OpenOptions::new()
             .read(true)
@@ -845,6 +946,27 @@ mod tests {
     fn rejects_invalid_ids() {
         assert!(uuid("../../unsafe").is_err());
         assert!(uuid(A).is_ok());
+    }
+    #[test]
+    fn backups_are_numbered_renamed_and_deleted_without_reusing_names() {
+        let (p, c) = fixture();
+        let first = c.dispatch(&json!({"Action":"backup"})).unwrap();
+        let named = c.dispatch(&json!({"Action":"backup","Name":"  升级前  "})).unwrap();
+        let id = |v: &Value| s(v, "Id").to_owned();
+        let titles = || -> Vec<String> {
+            c.state_base().unwrap()["Backups"].as_array().unwrap().iter().map(|b| s(b, "Name").to_owned()).collect()
+        };
+        assert!(titles().contains(&"新增备份 1".to_owned()));
+        assert!(titles().contains(&"升级前".to_owned()));
+        assert_eq!(c.state_base().unwrap()["NextBackupName"], "新增备份 2");
+        c.dispatch(&json!({"Action":"backup-rename","Id":id(&named),"Name":"新增备份 7"})).unwrap();
+        c.dispatch(&json!({"Action":"backup-delete","Id":id(&first)})).unwrap();
+        assert!(!c.data.join("backups").join(id(&first)).exists());
+        assert_eq!(c.state_base().unwrap()["NextBackupName"], "新增备份 8");
+        assert!(c.dispatch(&json!({"Action":"backup-rename","Id":id(&named),"Name":"a\nb"})).is_err());
+        assert!(c.dispatch(&json!({"Action":"backup-delete","Id":"../../../etc-000000000"})).is_err());
+        assert!(c.dispatch(&json!({"Action":"backup-delete","Id":id(&first)})).is_err());
+        fs::remove_dir_all(p).unwrap();
     }
     #[test]
     fn additive_copy_backup_and_modified_undo() {

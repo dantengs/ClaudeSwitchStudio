@@ -14,11 +14,15 @@ def inline(value):
 parts = []
 table = []
 paragraph = []
+items = []
 
 def flush():
     if paragraph:
         parts.append('<p>' + inline(' '.join(paragraph)) + '</p>')
         paragraph.clear()
+    if items:
+        parts.append('<ol>' + ''.join(f'<li>{inline(item)}</li>' for item in items) + '</ol>')
+        items.clear()
     if table:
         rows = [row for row in table if not re.match(r'^\|[\s:|\-]+\|$', row)]
         rendered = []
@@ -38,6 +42,9 @@ for line in source.splitlines():
         flush()
         level = len(line) - len(line.lstrip('#'))
         parts.append(f'<h{level}>{inline(line[level:].strip())}</h{level}>')
+    elif re.match(r'^\d+\. ', line):
+        if paragraph or table: flush()
+        items.append(line.split('. ', 1)[1])
     else:
         if table: flush()
         paragraph.append(line)

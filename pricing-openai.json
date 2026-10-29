@@ -1,0 +1,320 @@
+{
+  "Source": "https://developers.openai.com/api/docs/pricing.md",
+  "FetchedAt": "2026-10-29 02:00",
+  "Note": "USD per million tokens, Standard tier, from the official OpenAI pricing page. Refreshed automatically into data/pricing-openai.json.",
+  "Models": {
+    "gpt-6-astra": {
+      "Input": 10.0,
+      "Output": 50.0,
+      "CacheRead": 1.0,
+      "CacheWrite30m": 12.5,
+      "CacheWrite12h": 25.0,
+      "LongPrompt": {
+        "Input": 20.0,
+        "Output": 75.0,
+        "CacheRead": 2.0,
+        "CacheWrite30m": 25.0,
+        "CacheWrite12h": 50.0,
+        "Threshold": 272000
+      }
+    },
+    "gpt-6.1-sol": {
+      "Input": 2.0,
+      "Output": 10.0,
+      "CacheRead": 0.1,
+      "CacheWrite30m": 2.5,
+      "CacheWrite12h": 5.0,
+      "LongPrompt": {
+        "Input": 4.0,
+        "Output": 15.0,
+        "CacheRead": 0.2,
+        "CacheWrite30m": 5.0,
+        "CacheWrite12h": 10.0,
+        "Threshold": 272000
+      }
+    },
+    "gpt-6.1-terra": {
+      "Input": 1.0,
+      "Output": 5.0,
+      "CacheRead": 0.05,
+      "CacheWrite30m": 1.25,
+      "CacheWrite12h": 2.5,
+      "LongPrompt": {
+        "Input": 2.0,
+        "Output": 7.5,
+        "CacheRead": 0.1,
+        "CacheWrite30m": 2.5,
+        "CacheWrite12h": 5.0,
+        "Threshold": 272000
+      }
+    },
+    "gpt-6-luna": {
+      "Input": 0.1,
+      "Output": 0.5,
+      "CacheRead": 0.01,
+      "CacheWrite30m": 0.125,
+      "CacheWrite12h": 0.25,
+      "LongPrompt": {
+        "Input": 0.2,
+        "Output": 0.75,
+        "CacheRead": 0.02,
+        "CacheWrite30m": 0.25,
+        "CacheWrite12h": 0.5,
+        "Threshold": 272000
+      }
+    },
+    "gpt-6-sol": {
+      "Input": 2.0,
+      "Output": 10.0,
+      "CacheRead": 0.2,
+      "CacheWrite30m": 2.5,
+      "CacheWrite12h": 5.0,
+      "LongPrompt": {
+        "Input": 4.0,
+        "Output": 15.0,
+        "CacheRead": 0.4,
+        "CacheWrite30m": 5.0,
+        "CacheWrite12h": 10.0,
+        "Threshold": 272000
+      }
+    },
+    "gpt-5.6-sol": {
+      "Input": 4.0,
+      "Output": 20.0,
+      "CacheRead": 0.4,
+      "CacheWrite30m": 5.0,
+      "CacheWrite12h": 10.0,
+      "LongPrompt": {
+        "Input": 8.0,
+        "Output": 30.0,
+        "CacheRead": 0.8,
+        "CacheWrite30m": 10.0,
+        "CacheWrite12h": 20.0,
+        "Threshold": 272000
+      }
+    },
+    "gpt-5.6-terra": {
+      "Input": 2.0,
+      "Output": 12.0,
+      "CacheRead": 0.2,
+      "CacheWrite30m": 2.5,
+      "CacheWrite12h": 5.0,
+      "LongPrompt": {
+        "Input": 4.0,
+        "Output": 18.0,
+        "CacheRead": 0.4,
+        "CacheWrite30m": 5.0,
+        "CacheWrite12h": 10.0,
+        "Threshold": 272000
+      }
+    },
+    "gpt-5.6-luna": {
+      "Input": 0.2,
+      "Output": 1.2,
+      "CacheRead": 0.02,
+      "CacheWrite30m": 0.25,
+      "CacheWrite12h": 0.5,
+      "LongPrompt": {
+        "Input": 0.4,
+        "Output": 1.8,
+        "CacheRead": 0.04,
+        "CacheWrite30m": 0.5,
+        "CacheWrite12h": 1.0,
+        "Threshold": 272000
+      }
+    },
+    "gpt-5.5": {
+      "Input": 5.0,
+      "Output": 30.0,
+      "CacheRead": 0.5,
+      "LongPrompt": {
+        "Input": 10.0,
+        "Output": 45.0,
+        "CacheRead": 1.0,
+        "Threshold": 272000
+      }
+    },
+    "gpt-5.5-pro": {
+      "Input": 30.0,
+      "Output": 180.0,
+      "LongPrompt": {
+        "Input": 60.0,
+        "Output": 270.0,
+        "Threshold": 272000
+      }
+    },
+    "gpt-5.4": {
+      "Input": 2.5,
+      "Output": 15.0,
+      "CacheRead": 0.25,
+      "LongPrompt": {
+        "Input": 5.0,
+        "Output": 22.5,
+        "CacheRead": 0.5,
+        "Threshold": 272000
+      }
+    },
+    "gpt-5.4-pro": {
+      "Input": 30.0,
+      "Output": 180.0,
+      "LongPrompt": {
+        "Input": 60.0,
+        "Output": 270.0,
+        "Threshold": 272000
+      }
+    },
+    "gpt-5.4-mini": {
+      "Input": 0.75,
+      "Output": 4.5,
+      "CacheRead": 0.075
+    },
+    "gpt-5.4-nano": {
+      "Input": 0.2,
+      "Output": 1.25,
+      "CacheRead": 0.02
+    },
+    "gpt-5.2": {
+      "Input": 1.75,
+      "Output": 14.0,
+      "CacheRead": 0.175
+    },
+    "gpt-5.2-pro": {
+      "Input": 21.0,
+      "Output": 168.0
+    },
+    "gpt-5.1": {
+      "Input": 1.25,
+      "Output": 10.0,
+      "CacheRead": 0.125
+    },
+    "gpt-5": {
+      "Input": 1.25,
+      "Output": 10.0,
+      "CacheRead": 0.125
+    },
+    "gpt-5-mini": {
+      "Input": 0.25,
+      "Output": 2.0,
+      "CacheRead": 0.025
+    },
+    "gpt-5-nano": {
+      "Input": 0.05,
+      "Output": 0.4,
+      "CacheRead": 0.005
+    },
+    "gpt-5-pro": {
+      "Input": 15.0,
+      "Output": 120.0
+    },
+    "gpt-4.1": {
+      "Input": 2.0,
+      "Output": 8.0,
+      "CacheRead": 0.5
+    },
+    "gpt-4.1-mini": {
+      "Input": 0.4,
+      "Output": 1.6,
+      "CacheRead": 0.1
+    },
+    "gpt-4.1-nano": {
+      "Input": 0.1,
+      "Output": 0.4,
+      "CacheRead": 0.025
+    },
+    "gpt-4o": {
+      "Input": 2.5,
+      "Output": 10.0,
+      "CacheRead": 1.25
+    },
+    "gpt-4o-2024-05-13": {
+      "Input": 5.0,
+      "Output": 15.0
+    },
+    "gpt-4o-mini": {
+      "Input": 0.15,
+      "Output": 0.6,
+      "CacheRead": 0.075
+    },
+    "o1": {
+      "Input": 15.0,
+      "Output": 60.0,
+      "CacheRead": 7.5
+    },
+    "o1-pro": {
+      "Input": 150.0,
+      "Output": 600.0
+    },
+    "o3-pro": {
+      "Input": 20.0,
+      "Output": 80.0
+    },
+    "o3": {
+      "Input": 2.0,
+      "Output": 8.0,
+      "CacheRead": 0.5
+    },
+    "o4-mini": {
+      "Input": 1.1,
+      "Output": 4.4,
+      "CacheRead": 0.275
+    },
+    "o3-mini": {
+      "Input": 1.1,
+      "Output": 4.4,
+      "CacheRead": 0.55
+    },
+    "gpt-4-turbo-2024-04-09": {
+      "Input": 10.0,
+      "Output": 30.0
+    },
+    "gpt-4-0613": {
+      "Input": 30.0,
+      "Output": 60.0
+    },
+    "gpt-3.5-turbo": {
+      "Input": 0.5,
+      "Output": 1.5
+    },
+    "gpt-3.5-turbo-0125": {
+      "Input": 0.5,
+      "Output": 1.5
+    },
+    "gpt-5.6-cyber": {
+      "Input": 12.5,
+      "Output": 75.0,
+      "CacheRead": 1.25,
+      "CacheWrite30m": 15.625,
+      "CacheWrite12h": 31.25
+    },
+    "gpt-5.5-cyber": {
+      "Input": 12.5,
+      "Output": 75.0,
+      "CacheRead": 1.25
+    },
+    "gpt-rosalind-research": {
+      "Input": 5.0,
+      "Output": 25.0,
+      "CacheRead": 0.5
+    },
+    "gpt-rosalind-discovery": {
+      "Input": 5.0,
+      "Output": 25.0,
+      "CacheRead": 0.5
+    },
+    "chat-latest": {
+      "Input": 5.0,
+      "Output": 30.0,
+      "CacheRead": 0.5
+    },
+    "gpt-5.3-codex": {
+      "Input": 1.75,
+      "Output": 14.0,
+      "CacheRead": 0.175
+    },
+    "gpt-5-search-api": {
+      "Input": 1.25,
+      "Output": 10.0,
+      "CacheRead": 0.125
+    }
+  }
+}

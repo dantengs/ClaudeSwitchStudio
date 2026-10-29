@@ -38,7 +38,9 @@
 | 能力 | 当前状态 |
 | --- | --- |
 | 账号与邮箱 | 从本地记录精确匹配 UUID；支持用户确认对应关系及自定义显示名，注明来源 |
-| 账号卡片 | 区分“添加登录”“收录当前登录”“更新登录状态”“切换账号” |
+| 账号卡片 | 双列卡片，区分“添加登录”“收录当前登录”“更新登录状态”“切换账号”，显示收录时间 |
+| 添加账号（未发布） | `login-new`：先收录当前账号，移走本地登录文件（不服务器注销），让 Claude 打开登录页 |
+| 退出与重启（未发布） | `claude-processes` 只读检测；用户确认后 `QuitClaude` 退出 Desktop 进程树，`RelaunchClaude` 经 explorer 重新打开 |
 | 本地快照 | UUID 内部目录、身份核对、缓存存在检查、ACL、备份、复制校验、事务记录 |
 | 官方/第三方切换 | 本地文件适配器已实现；切出官方模式时保留当前最新状态 |
 | 第三方发现 | 只读识别用户已安装 CC Switch 的桌面提供商配置 |
@@ -49,7 +51,7 @@
 | 自建 OAuth | 未实现；没有将 CLI 授权冒充 Desktop 登录 |
 | 物理共享目录 | 未对真实账号目录创建 Junction 或 Symlink |
 | 原生侧栏完全同步 | 未实现，不能声称每个账号在 Claude 内看到同一份全部会话列表 |
-| 自动换号/预热 | 未实现，不发送模型预热请求 |
+| 自动换号/预热 | 未实现按额度自动换号，不发送模型预热请求；切换始终由用户点击发起 |
 | 服务端缓存继承 | 不提供，本地原文共享无法保证服务端提示词缓存命中 |
 | 在线登录有效性 | 未由本工具验证，不能以本地文件检查代替 |
 
@@ -103,13 +105,44 @@ Rust 接口通过 `--request <JSON> --response <JSON> --base <程序根>` 调用
 
 | Action | 性质 |
 | --- | --- |
-| `state`、`usage`、`workspace-plan` | 业务只读；仍可能创建本工具的请求/锁文件 |
+| `state`、`usage`、`workspace-plan`、`claude-processes` | 业务只读；仍可能创建本工具的请求/锁文件 |
 | `label` | 仅修改本工具的显示标签 |
 | `backup` | 要求退出 Claude，创建普通会话备份 |
 | `copy`、`undo` | 有维护确认和校验保护的历史数据操作；不是默认共享方案 |
-| `save`、`switch`、`provider-switch` | 真实认证/配置变更，必须有维护确认和进程检查 |
+| `save`、`switch`、`provider-switch`、`login-new` | 真实认证/配置变更，必须有维护确认和进程检查 |
 
 `MaintenanceConfirmed=true` 只是程序门禁，不等于智能体已经得到用户许可。文档中的接口说明也不构成运行真实操作的指令。
+
+### 进程识别、退出与重启
+
+进程检查统一在 `local_adapter.py`（`claude_processes`、`ensure_closed`），Rust 对认证动作不再重复做按名称的检查。只看本 Windows 会话中的 `claude.exe`：
+
+- `desktop`：路径含 `\WindowsApps\Claude_` 或 `\AnthropicClaude\`，包括 Electron 子进程；
+- `agent`：祖先是 desktop 进程的 Claude Code（Desktop 内的会话）；
+- `cli`：其他路径的独立 Claude Code，不读写 Desktop 登录文件，不阻止操作、永不关闭——即使它运行的是 Desktop 自带的同一个二进制；
+- `unknown`：读不到路径，阻止操作且不自动关闭。
+
+`execute()` 顺序：认证锁 → `reject_pending` → `preflight`（只读校验快照/身份/提供商，失败时不关闭 Claude）→ 仅当 `QuitClaude=true` 才 `quit_desktop`（`taskkill /T` 约 4 秒宽限，Desktop 通常隐藏到托盘，随后 `/T /F`；每轮重新读取进程表以免误杀复用 PID；退出后等待 1.5 秒释放 LevelDB/SQLite 句柄）→ 执行动作 → `RelaunchClaude` 时经 `explorer.exe shell:AppsFolder\<AUMID>` 或 exe 路径打开，Claude 不成为本工具子进程。动作失败时只在所有事务记录为终态（原登录保留或已还原）才重新打开；`rollback-needs-review` 时保持关闭。
+
+`login-new` 把 `Network`、`Local Storage`、`Session Storage`、`config.json` 移到数据目录内的 `.studio-displaced-*`，写回去掉 `oauth:*`、`lastKnownAccountUuid`、`bootSideSessions` 的 `config.json`，保留 `Local State` 与其他设置。“这样足以让 Desktop 显示登录页”是基于文件结构的推断，**尚未在真实客户端验证**。
+
+### 对话列表同步与托盘
+
+`sync_conversations`（`local_adapter.py`）在 Claude 关闭时运行：读取每个官方账号各组织目录里的 `local_<uuid>.json`，按 `sessionId` 取 `lastActivityAt` 最新的一份，向每个账号“已有对话的组织目录”（没有时用全部组织目录）补上缺少的条目。只用 `open('x')` 新建，跳过已存在文件、同目录 `deleted_<uuid>` 标记和本机没有原文的条目；去掉 `scheduledTaskId`、`remoteMcpServersConfig`，清空 `bridgeSessionIds`；新建文件记入 `data/conversation-sync/<时间戳>.json`。已有索引的标题、活动时间不会互相更新；第三方根目录不参与；尚无撤回界面（日志里有路径与 SHA-256）。请求带 `SyncConversations=true` 时，`execute()` 在动作成功后、重新打开 Claude 之前同步；也可单独发 `sync-conversations`。
+
+界面用 `Dispatcher.Run()` 代替 `ShowDialog()`，× 在 `CloseToTray` 开启时只隐藏窗口，`Exit-Studio` 才真正退出。`SetCurrentProcessExplicitAppUserModelID('ClaudeSwitchStudio.App')` 与安装器快捷方式的 `AppUserModelID` 必须一致。启动器第二次运行时 `Set()` 命名事件 `ClaudeSwitchStudio.Show`，界面定时器收到后唤出窗口；`--tray` 供 HKCU `Run` 项开机自启，卸载时 `[Code]` 删除该值。备份新增 `Name`、`backup-rename`、`backup-delete`（移到回收站）。
+
+### Codex 账号、Codex 用量与 MCP/技能开关
+
+进程辅助函数按 `APPS` 区分 claude 与 codex（`claude_processes(fixture, app)` 等保持原签名默认值）。Codex 桌面版是 `WindowsApps\OpenAI.Codex_*\app\ChatGPT.exe`，其子进程 `codex.exe` 归为 agent；独立 `codex.exe` 归为 cli，并且**阻止**切换（`CliBlocks`），因为它共用 `~/.codex/auth.json` 并可能在刷新令牌时改写。快照在 `~/.codex-profiles/<account_id>/`（ACL 保护），身份来自 `tokens.account_id` 与本地解码的 id_token（仅用于显示）。`codex-save/switch/login-new` 走与 Claude 相同的 `execute()` 流程（锁、预检、退出、重开）；切换前先 checkpoint 当前账号，同账号只更新快照。额度取每个账号最新会话（`session_meta.creator_account_id`）里的 `token_count.rate_limits`。`usage-stats` 带 `App=codex` 时解析 `~/.codex/sessions` 与 `archived_sessions`：`token_usage_record` 按 `response_id|turn_id` 去重，旧会话回退到 `token_count` 的增量；OpenAI `input_tokens` 含缓存读取，拆为未缓存输入与缓存读取；不计费。`Hours` 参数为滚动窗口与每小时趋势。
+
+Codex 添加账号（`codex-oauth-start/status/cancel`）在 `data/codex-oauth/<id>/home` 作为 `CODEX_HOME` 运行官方 `codex login`（优先 Codex 桌面版自带的 `%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe`），界面每 2 秒查询，出现已登录的 `auth.json` 即复制到 `~/.codex-profiles/<account>/` 并删除临时目录；结束登录进程前核对 PID 对应的可执行文件。`codex-save` 与这些动作属于 `CONFIG_ACTIONS`，不要求退出 Codex。OpenAI 价格由 `parse_openai_pricing` 解析官方 markdown（以单独的 Standard/Batch/Flex/Fast 行区分档位），写入 `data/pricing-openai.json`；`openai_cost` 把 `input_tokens` 拆为未缓存、缓存读与写入，超过 272K 用 LongPrompt。Claude Desktop 没有可指定目录的官方登录命令，不做后台授权。
+
+第三方账号与接入表：`vendor_catalog`（`vendor-state`）输出厂商预设 `VENDORS`、账号（不含 Key）和三个应用的当前来源。账号存 `data/vendors.json`，Key 经 `dpapi()`（CryptProtectData，当前用户）加密；Antigravity Tools 预设可设 `LinkedKey`，接入时才读其代理密钥。`vendor-save/vendor-delete/vendor-models/vendor-import/route-claude-code` 属于 CONFIG_ACTIONS；`codex-route` 按 codex 应用走退出/重开流程，Claude Desktop 用 `provider-switch` 的 `vendor:<Id>`。接入前的值存 `data/routes.json` 的 `Previous` 用于精确恢复；旧版 `data/agy-connections.json` 由 `route_state` 视为 `antigravity-legacy` 来源，切回官方时恢复并清除。Codex 第三方提供方固定为 `[model_providers.studio]`（Responses 接口），`set_top_key` 原位替换以便恢复后文件不变。主程序在 `execute` 前把请求文件中的 `Key` 删除，界面在读取响应后删除请求与响应文件。账号的 `Codex` 字段是 Responses 地址（旧版的 `Responses` 布尔值在读取时迁移）；Codex 提供方带 `requires_openai_auth = false` 和 `experimental_bearer_token`，不改 auth.json。本工具不做号池或请求转发，也不修改 Antigravity Tools 的设置。云备份：`data/cloud.json`（密码与加密密码经 DPAPI），`cloud-save/list/upload/restore/check`；文件格式 `CSSB1\n`+salt+iv+AES-256-CBC（Windows CNG，`AesCbc`）+HMAC-SHA256，PBKDF2-SHA256 30 万次；远程名 `settings|session-时间-机器标签[-备份ID].cssb`，按机器与种类保留 Keep 份。临时文件在 `data/cloud-temp/` 并在结束时删除。用量 `agy-usage` 读 `token_stats.db` 的 `token_usage`（`input_tokens` 含缓存），Google 价格 `parse_google_pricing` 解析官方 HTML 的 Standard 段落，带日期区间与 200K 档位，`*-preview` 另存去后缀别名，相邻的 `-customtools` 共用价格。本工具不实现自己的 Google 代理，也不复制 Google 令牌。
+
+`mcp-toggle` 编辑 `~/.claude.json` 的 `mcpServers` 或 `config.toml` 的 `[mcp_servers.<name>]`：TOML 文本只删改该表，前后用 `tomllib` 解析比对其余内容完全一致才写入；关闭时原配置存 `data/mcp-library.json`。`skill-toggle` 在 `~/.claude/skills` 与 `~/.codex/skills` 之间复制（树哈希校验），关闭前在 `data/skills-library` 和时间戳备份各存一份才 `rmtree`。两者走 `CONFIG_ACTIONS`，不退出应用。与 CC Switch 同时管理会互相覆盖，未做互通。
+
+开发机上本智能体本身就运行在 Claude Desktop 中：任何真实 `QuitClaude` 都会结束当前会话。测试只用 `--fixture` 的合成 `processes.json`/`process-log.json`；不要为验收在开发会话中调用真实退出。
 
 `save` 使用 `ExpectedAccount` 防止陈旧卡片收录错误身份，`DisplayName` 只用于显示。`switch` 同时核对目标快照与预期账号。发现目标其实就是当前身份时，更新当前快照而不是把旧令牌恢复到当前文件上。
 

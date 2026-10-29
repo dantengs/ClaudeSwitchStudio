@@ -1,3 +1,38 @@
+# 0.4.0-preview（源码已更新，安装包未发布）
+
+- 账号页改为双列卡片：显示名称、状态、收录时间和操作；当前账号高亮。
+- 新增“添加账号”：先收录当前账号，把本地登录文件移入时间戳备份（不在服务器注销），重新打开 Claude 的登录页；登录后再收录。
+- 收录、切换账号、切换提供商前检测 Claude Desktop；确认后自动退出、备份、切换并重新打开。独立 Claude Code 命令行不会被关闭，也不再阻止账号操作。
+- 校验在退出 Claude 之前进行：快照不完整或卡片不一致时直接拒绝，不关闭 Claude。操作失败且原登录已完整保留时，按原状态重新打开 Claude；事务需人工核对时保持关闭。
+- 修复确认窗口总显示空白输入框的问题（PowerShell 自动变量 `$Input` 冲突）。
+- 对话列表跨账号双向共享：切换账号时（Claude 已退出）把各官方账号缺少的对话索引互相补齐；只新增，不覆盖、不删除，尊重各账号的删除记录，每次新增写入 `data/conversation-sync/` 日志。对话页新增「同步到所有账号」，设置中可关闭自动同步。第三方工作区暂不参与。
+- 备份可自定义名称（默认「新增备份 N」）、重命名，删除时移到 Windows 回收站。
+- 任务栏显示本软件图标（独立 AppUserModelID，快捷方式同步设置）；点 × 最小化到托盘，托盘菜单可打开主界面、切换账号、添加账号、打开 Claude、刷新、开机自启和退出；托盘提示显示当前账号，后台完成的操作以通知提示。
+- 再次打开程序时唤出已有窗口；可选开机自启（托盘静默启动），卸载时移除自启项。
+- 修复自动重新打开 Claude 后提示仍写着“请自行打开 Claude”。
+- 关于页与 README 加入 GitHub 点赞入口。
+- 新增「用量统计」页（参考 CC Switch）：按今日/7 天/30 天/全部汇总 token、缓存命中和估算费用，分账号、分模型、每日趋势；同一请求只计一次；按切换时间线把请求归到当时的账号，显示最近限额提示。
+- 费用按官方价格页自动更新的价格计算（内置一份，超过 7 天自动刷新，可手动更新或自定义覆盖），区分 5 分钟/1 小时缓存写入、快速模式、长提示档位和仅美国推理。
+- 用量统计新增「近 24 小时」滚动范围与每小时趋势，并可切换到 Codex：按会话自带的创建账号统计、按 response_id 去重、显示每周/5 小时额度。
+- 新增「Codex 账号」页：收录、切换、添加多个 Codex（ChatGPT 登录）账号，切换时检测并退出/重开 Codex，先保存当前账号最新登录；显示每个账号的套餐和最近额度；独立 Codex 命令行会阻止切换且不会被关闭。托盘菜单可切换 Codex 账号。
+- 新增「MCP 与技能」页：按 Claude Code / Codex 开关 MCP 服务和技能，自动转换 MCP 格式，config.toml 只做经解析比对验证的最小修改，关闭时保留原配置与技能副本，每次修改前备份。
+- Codex「添加账号」改为后台授权：在临时目录运行官方 `codex login`，在浏览器完成 OpenAI 登录后自动加入账号列表，不退出、不切换当前 Codex；可复制链接或取消。收录当前 Codex 登录也不再需要退出 Codex。
+- Codex 用量接入 OpenAI 官方价格（Standard，含长上下文与缓存价格，自动更新）。
+- 用量趋势改为横向时间轴，放在费用卡片下方，标出峰值。
+- MCP 与技能列表新增「全选 / 全不选」批量开关。
+- 用量统计可选择 Antigravity：读取 Antigravity Tools 的请求记录，Gemini 按 Google 官方 Gemini API Standard 价格（按请求当天价格、200K 长上下文档位，自动更新），Claude 模型按 Anthropic 官方价格。
+- 新增 `ClaudeSwitchStudio.exe --exit`：请求正在运行的窗口正常退出。
+- 账号管理改为统一页面：Claude 官方账号、Codex 官方账号和第三方账号在同一页；侧栏不再有单独的「Codex 账号」和「Antigravity」页。
+- 新增接入表：为 Claude Desktop、Claude Code、Codex 各选一个来源（官方账号或第三方账号）和模型；修改前备份，切回时原样恢复。Claude Code 改动对新开的会话立即生效，不关闭已打开的会话；Codex 和 Claude Desktop 沿用检测、确认、退出、重开流程。没有对应接口的厂商在下拉框中显示为不可选并说明原因。
+- 新增第三方账号：按厂商分组，预设 DeepSeek、Kimi、智谱 GLM、通义千问、MiniMax、OpenRouter、Google Gemini API、Antigravity Tools（本机代理）和自定义；可用 Key 检测可用模型，设置默认模型与 Claude Code 的 Opus / Sonnet / Haiku 档位；API Key 用 Windows DPAPI 加密保存，含 Key 的请求文件在读取后立即删除。可从 CC Switch 只读导入 Claude 提供商。
+- Codex 第三方接入改为与 CC Switch 一致的 API Key 方式：每个账号单独填写「Codex 接口」（Responses），预设 DeepSeek、Kimi For Coding、Antigravity Tools 已带地址；Key 写在 Codex 的模型提供方中，不改动 ChatGPT 登录。从 CC Switch 导入同时读取 Codex 提供商，同一个 Key 的 Claude 与 Codex 配置合并成一个账号；Antigravity Tools 的代理密钥改为接入时读取。
+- 新增 WebDAV 云备份：备份可保存到本机、WebDAV 或两者；本机加密后上传（AES-256 + HMAC-SHA256，PBKDF2 派生密钥），自动建远程文件夹、按份数清理旧备份；可列出云端备份并恢复到本机（只补充、不覆盖）；启动时提示其他电脑上传的新备份。
+- 操作提示条显示 2 秒后淡出，鼠标停在上面时保持显示。
+- 移除号池设置：本工具不再修改 Antigravity Tools 的调度设置；需要号池时，把 Antigravity Tools 等本地代理作为第三方账号接入。旧版 Antigravity 页的接入记录会被识别，在接入表中选回官方即可原样恢复。
+- 创建备份改用统一确认流程：检测到 Claude 时可自动退出、备份后重新打开；进程检查与账号操作一致，不再因独立 Claude Code 命令行而失败。
+
+验证：43 项 Python 样例测试（含进程分类、退出/重启、预检、失败回退、添加账号、对话同步、官方价格解析、Codex 账号往返与命令行阻止、Codex 后台授权与取消、MCP 双向转换与 TOML 安全修改、技能开关与技能库、批量开关、第三方账号 Key 加密与模型检测、CC Switch 导入（含 Codex 合并）、WebDAV 加密上传/清理/恢复/拒绝错误密码与篡改、接入表切换 Claude Code / Codex / Claude Desktop 并精确恢复、旧版 Antigravity 接入的恢复、Google 按日期计价）、12 项 Rust 测试（含备份命名、用量去重与按切换归属、官方计费规则、Codex 用量与 OpenAI 计费）、偏好合并回归、WPF 只读冒烟测试（含接入表、第三方账号编辑窗口的只读拦截）与托盘只读实机检查。进程测试只用合成进程表；真实退出、重启与新账号登录由用户验收。
+
 # 0.3.1 — Windows 安装版
 
 - 原生 EXE 启动入口、原创 SVG/PNG/多尺寸 ICO 图标、中文/英文安装向导与卸载入口。

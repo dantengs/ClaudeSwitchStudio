@@ -1,6 +1,9 @@
 ﻿; Build through build-installer.ps1 so the payload safety checks run first.
 #ifndef AppVersion
-  #define AppVersion "0.3.1"
+  #define AppVersion "0.4.0-preview"
+#endif
+#ifndef NumericVersion
+  #define NumericVersion "0.4.0"
 #endif
 #ifndef PayloadDir
   #define PayloadDir SourcePath + "..\packaging\payload"
@@ -19,7 +22,7 @@ AppVersion={#AppVersion}
 AppVerName=Claude Switch Studio {#AppVersion}
 AppPublisher=Claude Switch Studio
 AppComments=Local account and conversation manager; an independent, unofficial application.
-VersionInfoVersion={#AppVersion}.0
+VersionInfoVersion={#NumericVersion}.0
 VersionInfoDescription=Claude Switch Studio Setup
 DefaultDirName={code:GetDefaultDirectory}
 DefaultGroupName=Claude Switch Studio
@@ -66,8 +69,9 @@ Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:Add
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Excludes: "data,data\*,private-auth-backups,private-auth-backups\*,.claude-profiles,.claude-profiles\*,__pycache__,__pycache__\*,*.pyc"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Claude Switch Studio"; Filename: "{app}\ClaudeSwitchStudio.exe"; WorkingDir: "{app}"; IconFilename: "{app}\ClaudeSwitchStudio.exe"
-Name: "{autodesktop}\Claude Switch Studio"; Filename: "{app}\ClaudeSwitchStudio.exe"; WorkingDir: "{app}"; IconFilename: "{app}\ClaudeSwitchStudio.exe"; Tasks: desktopicon
+; Same AppUserModelID as Studio.ps1, so the window and a pinned shortcut share one taskbar button.
+Name: "{group}\Claude Switch Studio"; Filename: "{app}\ClaudeSwitchStudio.exe"; WorkingDir: "{app}"; IconFilename: "{app}\ClaudeSwitchStudio.exe"; AppUserModelID: "ClaudeSwitchStudio.App"
+Name: "{autodesktop}\Claude Switch Studio"; Filename: "{app}\ClaudeSwitchStudio.exe"; WorkingDir: "{app}"; IconFilename: "{app}\ClaudeSwitchStudio.exe"; AppUserModelID: "ClaudeSwitchStudio.App"; Tasks: desktopicon
 
 [Run]
 ; Only an unchecked opt-in on the interactive Finish page. Never launches in silent mode.
@@ -80,4 +84,11 @@ begin
     Result := 'D:\programfile\Claude Switch Studio'
   else
     Result := ExpandConstant('{localappdata}\Programs\Claude Switch Studio');
+end;
+
+// The in-app "start with Windows" option writes this value; data and backups are still kept.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'ClaudeSwitchStudio');
 end;

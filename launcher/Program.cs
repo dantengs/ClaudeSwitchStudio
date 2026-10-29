@@ -8,8 +8,9 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("Claude Switch Studio")]
 [assembly: AssemblyDescription("Local account and conversation workspace")]
 [assembly: AssemblyProduct("Claude Switch Studio")]
-[assembly: AssemblyVersion("0.3.1.0")]
-[assembly: AssemblyFileVersion("0.3.1.0")]
+[assembly: AssemblyVersion("0.4.0.0")]
+[assembly: AssemblyFileVersion("0.4.0.0")]
+[assembly: AssemblyInformationalVersion("0.4.0-preview")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 Claude Switch Studio contributors")]
 
 internal static class Program
@@ -19,7 +20,10 @@ internal static class Program
     {
         string root = AppDomain.CurrentDomain.BaseDirectory;
         if (args.Length == 1 && args[0] == "--self-check") return SelfCheck(root);
-        if (args.Length > 0 && !(args.Length == 1 && args[0] == "--read-only"))
+        if (args.Length == 1 && args[0] == "--exit") return RequestExit();
+        // --tray starts hidden in the notification area; Windows autostart uses it.
+        string mode = args.Length == 1 ? args[0] : "";
+        if (args.Length > 1 || (args.Length == 1 && mode != "--read-only" && mode != "--tray"))
         {
             MessageBox.Show("不支持此启动参数。请直接打开程序。", "Claude Switch Studio");
             return 2;
@@ -29,7 +33,14 @@ internal static class Program
         {
             if (!created)
             {
-                MessageBox.Show("程序已在运行，请使用现有窗口。", "Claude Switch Studio");
+                // The running window listens for this event and brings itself to the front.
+                EventWaitHandle show;
+                if (EventWaitHandle.TryOpenExisting("ClaudeSwitchStudio.Show", out show))
+                {
+                    using (show) { if (mode != "--tray") show.Set(); }
+                    return 0;
+                }
+                MessageBox.Show("程序已在运行，请在任务栏或托盘中打开。", "Claude Switch Studio");
                 return 0;
             }
             try
@@ -40,7 +51,7 @@ internal static class Program
                 if (!File.Exists(script) || !File.Exists(powershell)) throw new FileNotFoundException("程序文件不完整，请重新安装。");
                 ProcessStartInfo start = new ProcessStartInfo(powershell);
                 start.Arguments = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File \"" + script + "\"" +
-                    (args.Length == 1 ? " -ReadOnly" : "");
+                    (mode == "--read-only" ? " -ReadOnly" : mode == "--tray" ? " -Tray" : "");
                 start.WorkingDirectory = root;
                 start.UseShellExecute = false;
                 start.CreateNoWindow = true;
@@ -60,6 +71,23 @@ internal static class Program
             }
             finally { instance.ReleaseMutex(); }
         }
+    }
+
+    // Asks a running window to quit the same way as the tray's exit item (it refuses while busy).
+    // Returns 0 once no instance holds the runtime lock, 3 if it is still running after 15 seconds.
+    private static int RequestExit()
+    {
+        EventWaitHandle exit;
+        if (!EventWaitHandle.TryOpenExisting("ClaudeSwitchStudio.Exit", out exit)) return 0;
+        using (exit) exit.Set();
+        for (int i = 0; i < 60; i++)
+        {
+            Mutex running;
+            if (!Mutex.TryOpenExisting("ClaudeSwitchStudio.Runtime", out running)) return 0;
+            running.Dispose();
+            Thread.Sleep(250);
+        }
+        return 3;
     }
 
     // Side-effect-free packaging check; never starts the UI, Claude, or an auth action.
