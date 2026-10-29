@@ -8,9 +8,9 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("Claude Switch Studio")]
 [assembly: AssemblyDescription("Local account and conversation workspace")]
 [assembly: AssemblyProduct("Claude Switch Studio")]
-[assembly: AssemblyVersion("0.4.0.0")]
-[assembly: AssemblyFileVersion("0.4.0.0")]
-[assembly: AssemblyInformationalVersion("0.4.0-preview")]
+[assembly: AssemblyVersion("0.4.1.0")]
+[assembly: AssemblyFileVersion("0.4.1.0")]
+[assembly: AssemblyInformationalVersion("0.4.1-preview")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 Claude Switch Studio contributors")]
 
 internal static class Program

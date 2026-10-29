@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "claude-switch-core"
-version = "0.4.0-preview"
+version = "0.4.1-preview"
 dependencies = [
  "chrono",
  "fs2",

@@ -243,21 +243,109 @@ class AdapterTests(unittest.TestCase):
         own_y = self.session(self.B_ID, org_b, y, 'cli-y', activity=5)
         adapter.atomic_json(self.official / 'claude-code-sessions' / self.B_ID / org_a / 'scheduled-tasks.json', [])
         (own_y.parent / f'deleted_{w}').write_text('', encoding='utf-8')  # B deleted w; never bring it back.
-        stale_y = self.session(self.A_ID, org_a, y, 'cli-y', activity=1, title='keep-A-copy')
+        stale_y = self.session(self.A_ID, org_a, y, 'cli-y', activity=1, title='renamed-in-A', titleSource='user', previousTitles=['1000'])
         result = adapter.sync_conversations(self.data, self.root)
         b_org = own_y.parent
         self.assertTrue((b_org / f'local_{x}.json').exists())
         self.assertFalse((b_org / f'local_{w}.json').exists())
         self.assertFalse((b_org / f'local_{gone}.json').exists())
-        # The organization folder B does not use stays empty; existing indexes are never rewritten.
+        # The organization folder B does not use stays empty.
         self.assertFalse((self.official / 'claude-code-sessions' / self.B_ID / org_a / f'local_{x}.json').exists())
-        self.assertEqual(adapter.read(stale_y)['title'], 'keep-A-copy')
+        # Both copies of y now share A's manual title and B's later progress; originals are kept aside.
+        self.assertEqual(adapter.read(own_y)['title'], 'renamed-in-A')
+        self.assertEqual(adapter.read(stale_y)['lastActivityAt'], 5)
         copied = adapter.read(b_org / f'local_{x}.json')
         self.assertEqual(copied['bridgeSessionIds'], [])
         self.assertNotIn('scheduledTaskId', copied); self.assertNotIn('remoteMcpServersConfig', copied)
-        self.assertEqual(result['Created'], 1)
-        self.assertEqual(adapter.read(result['Journal'])['Status'], 'committed')
-        self.assertEqual(adapter.sync_conversations(self.data, self.root)['Created'], 0)
+        self.assertEqual((result['Created'], result['Updated']), (1, 2))
+        journal = adapter.read(result['Journal'])
+        self.assertEqual(journal['Status'], 'committed')
+        self.assertEqual(adapter.read(next(e['Backup'] for e in journal['Updated'] if e['Path'] == str(own_y)))['title'], '1000')
+        again = adapter.sync_conversations(self.data, self.root)
+        self.assertEqual((again['Created'], again['Updated']), (0, 0))
+        self.assertNotIn('Journal', again)
+
+    def test_renamed_and_moved_conversations_follow_the_latest_edit(self):
+        org_a, org_b = 'aaaaaaaa-0000-4000-8000-000000000001', 'bbbbbbbb-0000-4000-8000-000000000002'
+        sid = '30000000-0000-4000-8000-000000000001'
+        (self.user / '.claude/projects/p').mkdir(parents=True)
+        (self.user / '.claude/projects/p/cli-z.jsonl').write_text('{}', encoding='utf-8')
+        in_a = self.session(self.A_ID, org_a, sid, 'cli-z', title='old', titleSource='user', previousTitles=['x', 'y', 'z'], cwd='C:\\A')
+        in_b = self.session(self.B_ID, org_b, sid, 'cli-z', title='old', titleSource='user', previousTitles=['x', 'y', 'z'], cwd='C:\\A')
+        self.assertNotIn('Journal', adapter.sync_conversations(self.data, self.root))  # Records the shared baseline.
+        # B renames once (fewer previous titles than A has); A moves the conversation to another folder.
+        adapter.atomic_json(in_b, dict(adapter.read(in_b), title='new', previousTitles=['old']))
+        adapter.atomic_json(in_a, dict(adapter.read(in_a), cwd='C:\\B', originCwd='C:\\B'))
+        result = adapter.sync_conversations(self.data, self.root)
+        self.assertEqual(result['Updated'], 2)
+        for path in (in_a, in_b):
+            value = adapter.read(path)
+            self.assertEqual((value['title'], value['previousTitles'], value['cwd'], value['originCwd']), ('new', ['old'], 'C:\\B', 'C:\\B'))
+        self.assertIn('统一了 2 个对话条目', result['Message'])
+
+    def ldb_store(self, folder, account, scope, values):
+        """A minimal LevelDB store as Chromium leaves it: manifest, empty log, then one appended batch."""
+        folder.mkdir(parents=True)
+        edit = b'\x01' + adapter.put_varint(26) + b'leveldb.BytewiseComparator' + b'\x02\x03\x03\x04\x04\x00'
+        (folder / 'MANIFEST-000001').write_bytes(adapter.masked_crc(b'\x01' + edit).to_bytes(4, 'little') + len(edit).to_bytes(2, 'little') + b'\x01' + edit)
+        (folder / 'CURRENT').write_text('MANIFEST-000001\n', encoding='ascii')
+        (folder / '000003.log').write_bytes(b'')
+        frame = {'state': {'lastSidebarScopeKey': scope}, 'version': 1}
+        items = [(adapter.ls_key('dframe-store'), adapter.ls_value(json.dumps(frame)))]
+        items += [(adapter.ls_key(k), adapter.ls_value(json.dumps(v, ensure_ascii=False))) for k, v in values.items()]
+        adapter.ldb_put(folder, items, 0)
+        adapter.atomic_json(folder.parent.parent / 'config.json', {'lastKnownAccountUuid': account})
+
+    def test_sidebar_folders_follow_the_account_edited_last(self):
+        org_a, org_b = 'aaaaaaaa-0000-4000-8000-000000000001', 'bbbbbbbb-0000-4000-8000-000000000002'
+        scope_a, scope_b = f'{self.A_ID}/{org_a}', f'{self.B_ID}/{org_b}'
+        sid = '40000000-0000-4000-8000-000000000001'
+        (self.user / '.claude/projects/p').mkdir(parents=True)
+        (self.user / '.claude/projects/p/cli-f.jsonl').write_text('{}', encoding='utf-8')
+        self.session(self.A_ID, org_a, sid, 'cli-f')
+        self.session(self.B_ID, org_b, sid, 'cli-f')
+        other = 'code:local_50000000-0000-4000-8000-000000000001'
+        plain = {'sections': [{'id': 'sessions', 'kind': 'sessions'}], 'prefsSeeded': True}
+        in_a = {'sections': [{'id': 'cg-a', 'kind': 'manual', 'name': 'A folder', 'members': [f'code:local_{sid}', other]},
+                             {'id': 'sessions', 'kind': 'sessions'}], 'prefsSeeded': True}
+        moved = {'sections': [{'id': 'cg-1', 'kind': 'manual', 'name': '研究', 'members': [f'code:local_{sid}']},
+                              {'id': 'sessions', 'kind': 'sessions'}], 'prefsSeeded': True}
+        key = adapter.SECTIONS_KEY
+        live = self.official / 'Local Storage/leveldb'
+        (self.official / 'Local Storage/sample').unlink(); (self.official / 'Local Storage').rmdir()
+        self.ldb_store(live, self.A_ID, scope_a, {key: {'value': {scope_a: in_a}, 'tabId': 't', 'timestamp': 100}})
+        saved_b = self.profiles / 'desktop-B' / 'Local Storage/leveldb'
+        self.ldb_store(saved_b, self.B_ID, scope_b, {key: {'value': {scope_b: moved, scope_a: plain}, 'tabId': 't', 'timestamp': 200}})
+        before = adapter.ldb_state(saved_b)
+        result = adapter.sync_conversations(self.data, self.root)
+        self.assertTrue(result['Folders'])
+        stored = lambda: json.loads(adapter.ls_text(adapter.ldb_state(live)[0][adapter.ls_key(key)]))
+        # First sync: B's newer folders lead, and A's own folder is kept for what is not filed yet.
+        merged = {'sections': moved['sections'] + [dict(in_a['sections'][0], members=[other])], 'prefsSeeded': True}
+        self.assertEqual(stored()['value'], {scope_a: merged, scope_b: merged})
+        self.assertEqual(stored()['tabId'], 't')
+        self.assertEqual(adapter.ldb_state(saved_b), before)  # Saved logins are only read.
+        journal = adapter.read(result['Journal'])
+        self.assertTrue((Path(journal['Sidebar']['Backup']) / '000003.log').is_file())
+        self.assertFalse(adapter.sync_conversations(self.data, self.root)['Folders'])
+        # Later, A deletes its folder in Desktop; B's stale saved copy must not bring it back.
+        values, last = adapter.ldb_state(live)
+        edited = dict(stored(), timestamp=stored()['timestamp'] + 1000)
+        edited['value'] = dict(edited['value'], **{scope_a: moved})
+        adapter.ldb_put(live, [(adapter.ls_key(key), adapter.ls_value(json.dumps(edited, ensure_ascii=False)))], last)
+        self.assertTrue(adapter.sync_conversations(self.data, self.root)['Folders'])
+        self.assertEqual(stored()['value'], {scope_a: moved, scope_b: moved})
+
+    def test_snappy_blocks_and_torn_logs(self):
+        self.assertEqual(adapter.unsnappy(b'\x0c\x0cabcd\x11\x04'), b'abcdabcdabcd')
+        with self.assertRaises(ValueError):
+            adapter.unsnappy(b'\x0c\x0cabcd\x11\x09')
+        folder = self.root / 'store/leveldb'
+        self.ldb_store(folder, self.A_ID, 'a/b', {'k': {'v': 1}})
+        log = folder / '000003.log'
+        log.write_bytes(log.read_bytes() + b'\x01\x02\x03\x04\x05\x06\x07\x08')
+        with self.assertRaisesRegex(ValueError, '末尾不完整'):
+            adapter.ldb_put(folder, [(b'x', b'y')], 5)
 
     def test_switch_can_share_conversations_while_claude_is_closed(self):
         a = self.two_accounts()
@@ -268,7 +356,7 @@ class AdapterTests(unittest.TestCase):
         (self.official / 'claude-code-sessions' / self.A_ID / 'dddddddd-0000-4000-8000-000000000004').mkdir(parents=True)
         self.running()
         result = adapter.execute(self.request('switch', Name=a['Profile'], QuitClaude=True, RelaunchClaude=True, SyncConversations=True), self.data, self.root)
-        self.assertIn('已把 1 条对话同步', result['Message'])
+        self.assertIn('已补齐 1 条对话到 1 个账号的列表', result['Message'])
         self.assertTrue(list((self.official / 'claude-code-sessions' / self.A_ID).glob(f'*/local_{sid}.json')))
         self.assertEqual([list(entry) for entry in self.process_log()], [['Quit'], ['Launch']])
 

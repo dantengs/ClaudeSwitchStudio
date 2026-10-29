@@ -1,9 +1,9 @@
 ﻿; Build through build-installer.ps1 so the payload safety checks run first.
 #ifndef AppVersion
-  #define AppVersion "0.4.0-preview"
+  #define AppVersion "0.4.1-preview"
 #endif
 #ifndef NumericVersion
-  #define NumericVersion "0.4.0"
+  #define NumericVersion "0.4.1"
 #endif
 #ifndef PayloadDir
   #define PayloadDir SourcePath + "..\packaging\payload"

@@ -112,7 +112,7 @@ function Sync-StartupOptions {
 }
 function Navigate([string]$Page) {
     $script:Page=$Page
-    $titles=@{accounts=@('账号管理','官方账号一键切换，第三方账号按厂商管理，接入表决定每个应用用哪个来源。');tools=@('MCP 与技能','按应用开关 MCP 服务和技能，参考 CC Switch。');sessions=@('共享对话池','一条原文只展示一次，账号与提供商作为独立身份。');usage=@('用量统计','按账号、模型和日期汇总本机记录的 token 用量与缓存。');backups=@('备份中心','每次变更前，保留带时间戳的可核验副本。');settings=@('设置与本地记忆','更舒适的阅读，清晰可见的本地数据。')}
+    $titles=@{accounts=@('账号管理','官方账号一键切换，第三方账号按厂商管理，接入表决定每个应用用哪个来源。');tools=@('MCP 与技能','按应用分别开关 MCP 服务和技能，修改前自动备份。');sessions=@('共享对话池','一条原文只展示一次，账号与提供商作为独立身份。');usage=@('用量统计','按账号、模型和时间汇总本机记录的 token 用量与缓存；「今日」为当天 0 点到 24 点。');backups=@('备份中心','每次变更前，保留带时间戳的可核验副本。');settings=@('设置与本地记忆','更舒适的阅读，清晰可见的本地数据。')}
     foreach($key in @('accounts','sessions','usage','tools','backups','settings')) {
         $control=$key.Substring(0,1).ToUpper()+$key.Substring(1)+'Page'
         $script:UI[$control].Visibility=$(if($Page -eq $key){'Visible'}else{'Collapsed'})
@@ -697,7 +697,7 @@ function Display-Stats($Value) {
     $trend=@($Value.Trend);[array]::Reverse($trend)
     $peakRow=$trend | Sort-Object {[double]$_.Total} -Descending | Select-Object -First 1
     $peak=[Math]::Max(1,[double]$peakRow.Total)
-    $hourly=[int](Prop $Value 'Hours' 0) -gt 0
+    $hourly=[bool](Prop $Value 'Hourly' ([int](Prop $Value 'Hours' 0) -gt 0))
     $every=[Math]::Max(1,[Math]::Ceiling($trend.Count/$(if($hourly){8}else{10})))
     for($i=0;$i -lt $trend.Count;$i++){
         $row=$trend[$i];$total=[double]$row.Total
@@ -755,7 +755,7 @@ $script:Window.Add_Closed({
 })
 $script:UI.CloseToTrayCheck.Add_Click({$script:CloseToTray=[bool]$script:UI.CloseToTrayCheck.IsChecked;Save-Preferences})
 $script:UI.AutoSyncCheck.Add_Click({$script:AutoSync=[bool]$script:UI.AutoSyncCheck.IsChecked;Save-Preferences})
-$script:UI.SyncBtn.Add_Click({Confirm-ClaudeExit '同步所有账号的对话列表' '把每个官方账号的对话补到其他账号的列表里，之后在任一账号登录都能看到全部对话。只新增缺少的条目，不覆盖、不删除已有条目；在某账号删除过的对话不会被加回该账号。原文本来就在本机共享，不会复制。' '立即同步' @{Action='sync-conversations'} '正在同步对话列表…'})
+$script:UI.SyncBtn.Add_Click({Confirm-ClaudeExit '同步所有账号的对话列表' '把每个官方账号的对话补到其他账号的列表里，并统一各账号的对话标题、工作目录和侧栏文件夹（以最后修改的为准），之后在任一账号登录看到的都一样。不删除条目；在某账号删除过的对话不会被加回该账号；改写前先备份原文件。原文本来就在本机共享，不会复制。' '立即同步' @{Action='sync-conversations'} '正在同步对话列表…'})
 $script:UI.AutostartCheck.Add_Click({Set-Autostart ([bool]$script:UI.AutostartCheck.IsChecked);Sync-StartupOptions})
 $script:UI.ThemeBtn.Add_Click({Set-Theme (-not $script:Dark)})
 $script:UI.SettingsThemeBtn.Add_Click({Set-Theme (-not $script:Dark)})

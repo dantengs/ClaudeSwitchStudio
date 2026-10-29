@@ -26,7 +26,7 @@
 - 识别本机 Claude Desktop 历史账号，展示有来源的邮箱对应关系和已收录状态。
 - 以账号卡片管理多个官方 Claude Desktop 账号的实验性本地登录快照，可从官方登录页添加新账号。
 - 一键切换：工具检测 Claude Desktop 是否在运行，经你确认后自动退出、创建时间戳备份、切换并重新打开 Claude；独立运行的 Claude Code 命令行不受影响。
-- 对话列表跨账号双向共享：切换账号、Claude 退出期间，每个官方账号自动补上其他账号的对话（只新增，尊重删除记录）。
+- 对话列表跨账号双向共享：切换账号、Claude 退出期间，每个官方账号自动补上其他账号的对话，并统一标题、工作目录和侧栏文件夹（不删除条目，尊重删除记录）。
 - 参考 CC Switch 的用量统计：可选近 24 小时、今日、7 天、30 天或全部，按账号、模型和日期（或小时）汇总 token、缓存命中与费用；Claude、Codex、Antigravity 分别按 Anthropic、OpenAI、Google 官方价格页自动更新的价格折算，趋势图为横向时间轴。
 - 参考 Antigravity Tools 管理多个 Codex 账号：收录多个 ChatGPT 登录，用同样的检测-退出-重开流程切换，并显示每个账号最近的每周/5 小时额度；添加 Codex 账号在后台通过官方浏览器授权完成，不用退出 Codex；Codex 用量按账号和模型统计，并按 OpenAI 官方价格折算。
 - 统一的账号管理页：Claude 官方账号、Codex 官方账号和按厂商分组的第三方账号（DeepSeek、Kimi、智谱、通义千问、MiniMax、OpenRouter、Gemini、Antigravity Tools 本地代理与自定义）。顶部接入表为 Claude Desktop、Claude Code 和 Codex 各选一个来源，修改前备份、切回时原样恢复。添加第三方账号时可用 Key 检测可用模型；Key 用 Windows 数据保护加密保存。Codex 与 CC Switch 一样以 API Key 方式接入。

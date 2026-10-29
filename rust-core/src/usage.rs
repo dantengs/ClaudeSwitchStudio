@@ -355,6 +355,9 @@ pub(super) fn usage_stats(ctx: &Context, r: &Value) -> Result<Value> {
     let days = r["Days"].as_i64().unwrap_or(7).clamp(0, 3650);
     // "Hours" selects a rolling window (e.g. the last 24 hours) with an hourly trend instead of days.
     let hours = r["Hours"].as_i64().unwrap_or(0).clamp(0, 24 * 31);
+    // "Today" covers the calendar day, 00:00 to 24:00, shown hour by hour.
+    let day_view = hours == 0 && days == 1;
+    let hourly = hours > 0 || day_view;
     let now = local_now();
     let today = now.date_naive();
     let since = if hours > 0 {
@@ -453,14 +456,14 @@ pub(super) fn usage_stats(ctx: &Context, r: &Value) -> Result<Value> {
             total.add(&message["usage"], price);
             by_account.entry(key).or_default().add(&message["usage"], price);
             by_model.entry(model.to_owned()).or_default().add(&message["usage"], price);
-            let bucket = if hours > 0 { "%Y-%m-%d %H" } else { "%Y-%m-%d" };
+            let bucket = if hourly { "%Y-%m-%d %H" } else { "%Y-%m-%d" };
             let day = beijing().timestamp_millis_opt(time).single()
                 .map(|d| d.format(bucket).to_string()).unwrap_or_default();
             by_day.entry(day).or_default().add(&message["usage"], price);
         }
     }
     if codex {
-        (total, by_account, by_model, by_day, quota, first_seen) = codex_usage(ctx, since, hours, &pricing)?;
+        (total, by_account, by_model, by_day, quota, first_seen) = codex_usage(ctx, since, if hourly { 1 } else { 0 }, &pricing)?;
     }
     let all = total.total();
     let mut accounts: Vec<Value> = by_account.iter().map(|(key, tally)| {
@@ -478,10 +481,13 @@ pub(super) fn usage_stats(ctx: &Context, r: &Value) -> Result<Value> {
     }).collect();
     models.sort_by_key(|row| std::cmp::Reverse(row["Total"].as_u64().unwrap_or(0)));
     // A continuous run of days, so empty days show as gaps instead of disappearing.
-    let span = if hours > 0 { hours } else if days == 0 { 30 } else { days.min(30) };
+    let span = if hours > 0 { hours } else if day_view { 24 } else if days == 0 { 30 } else { days.min(30) };
     let peak = by_day.values().map(Tally::total).max().unwrap_or(0).max(1);
     let trend: Vec<Value> = (0..span).map(|back| { // newest first
-        let (date, label) = if hours > 0 {
+        let (date, label) = if day_view {
+            let hour = 23 - back;
+            (format!("{} {:02}", today.format("%Y-%m-%d"), hour), format!("{:02}:00", hour))
+        } else if hours > 0 {
             let at = now - chrono::Duration::hours(back);
             (at.format("%Y-%m-%d %H").to_string(), at.format("%H:00").to_string())
         } else {
@@ -493,7 +499,7 @@ pub(super) fn usage_stats(ctx: &Context, r: &Value) -> Result<Value> {
         json!({"Date":date,"Label":label,"Total":tally.total(),"TotalText":tokens(tally.total()),"Requests":tally.requests,
             "Width":(tally.total() as f64 / peak as f64 * 420.0).max(if tally.total()>0{2.0}else{0.0})})
     }).collect();
-    let mut out = json!({"Days":days,"Hours":hours,"TrendTitle":if hours>0{"每小时趋势"}else{"每日趋势"},"Totals":total.json(all,priced),"Accounts":accounts,"Models":models,"Trend":trend,"Priced":priced,"App":if codex{"codex"}else{"claude"},"PriceSource":price_source,
+    let mut out = json!({"Days":days,"Hours":hours,"Hourly":hourly,"TrendTitle":if day_view{"今日每小时（0–24 点）"}else if hours>0{"每小时趋势"}else{"每日趋势"},"Totals":total.json(all,priced),"Accounts":accounts,"Models":models,"Trend":trend,"Priced":priced,"App":if codex{"codex"}else{"claude"},"PriceSource":price_source,
         "TimelineEvents":events.len(),"Since":if first_seen==i64::MAX{Value::Null}else{json!(first_seen)},
         "Note":"按本工具记录的切换时间推算每个请求所属账号；在 Claude 内自行换号的时段无法区分。只统计本机对话文件里的记录，不是官方账单。"});
     if codex {
@@ -588,7 +594,11 @@ mod tests {
         write_json(&ctx.data.join("pricing.json"), &json!({"Models":{"claude-test":{"Input":1000000.0,"Output":0.0,"CacheRead":0.0,"CacheWrite":0.0}}})).unwrap();
         let rolling = usage_stats(&ctx, &json!({"Hours":24})).unwrap();
         assert_eq!(rolling["Trend"].as_array().unwrap().len(), 24);
-        assert_eq!(rolling["TrendTitle"], "每小时趋势");        let stats = usage_stats(&ctx, &json!({"Days":0})).unwrap();
+        assert_eq!(rolling["TrendTitle"], "每小时趋势");
+        let today = usage_stats(&ctx, &json!({"Days":1})).unwrap();
+        let hours: Vec<String> = today["Trend"].as_array().unwrap().iter().map(|r| s(r, "Label").to_owned()).collect();
+        assert_eq!((hours.len(), hours[0].as_str(), hours[23].as_str()), (24, "23:00", "00:00"));
+        assert_eq!(today["Hourly"], true);        let stats = usage_stats(&ctx, &json!({"Days":0})).unwrap();
         assert_eq!(stats["Totals"]["Requests"], 2);
         assert_eq!(stats["Totals"]["Output"], 12);
         assert_eq!(stats["Totals"]["CostText"], "$20.00");

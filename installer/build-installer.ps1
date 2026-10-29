@@ -3,7 +3,7 @@
     [string]$PayloadDir=(Join-Path (Split-Path $PSScriptRoot -Parent) 'packaging\payload'),
     [string]$OutputDir=(Join-Path (Split-Path $PSScriptRoot -Parent) 'dist'),
     [string]$ChineseLanguageFile='',
-    [string]$Version='0.4.0-preview'
+    [string]$Version='0.4.1-preview'
 )
 $ErrorActionPreference='Stop'
 # An optional lowercase suffix marks local preview builds; Windows file versions stay numeric.

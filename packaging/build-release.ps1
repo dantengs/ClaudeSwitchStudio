@@ -2,7 +2,7 @@ param(
     [string]$ToolRoot='D:\programfile\RustStudioToolchain',
     [string]$Compiler='D:\programfile\ClaudeSwitchBuildTools\InnoSetup6\ISCC.exe',
     [string]$OutputDir='',
-    [string]$Version='0.4.0-preview',
+    [string]$Version='0.4.1-preview',
     [switch]$SkipCompile
 )
 $ErrorActionPreference='Stop'

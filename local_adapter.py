@@ -2048,6 +2048,8 @@ def agy_usage(request, data_root=None, fixture=None):
     hours, days = int(request.get('Hours') or 0), int(request.get('Days') if request.get('Days') is not None else 7)
     zone = timezone(timedelta(hours=8))
     now = datetime.now(zone)
+    day_view = not hours and days == 1  # "Today": 00:00 to 24:00 of the calendar day, by hour.
+    hourly = bool(hours) or day_view
     if hours:
         since = now - timedelta(hours=hours)
     elif days:
@@ -2088,7 +2090,7 @@ def agy_usage(request, data_root=None, fixture=None):
             base = tier['Input']
             # Antigravity records input including cached tokens (total = input + output).
             cost = ((input_tokens - cached) * base + cached * tier.get('CacheRead', base) + output_tokens * tier['Output']) / 1e6
-        bucket = moment.strftime('%Y-%m-%d %H' if hours else '%Y-%m-%d')
+        bucket = moment.strftime('%Y-%m-%d %H' if hourly else '%Y-%m-%d')
         for group in (total, accounts.setdefault(email or '未知账号', tally()), models.setdefault(model or '未知模型', tally()),
                       buckets.setdefault(bucket, tally())):
             group['Requests'] += 1; group['Input'] += max(0, input_tokens - cached); group['Output'] += output_tokens
@@ -2108,18 +2110,22 @@ def agy_usage(request, data_root=None, fixture=None):
                 'CacheRead': group['CacheRead'], 'CacheReadText': fmt_tokens(group['CacheRead']), 'CacheWrite': 0, 'CacheWriteText': '0',
                 'CacheHitPercent': round(group['CacheRead'] * 100 / prompt, 1) if prompt else 0.0,
                 'SharePercent': round(all_tokens * 100 / grand, 1) if grand else 0.0, 'CostText': cost, 'QuotaText': ''}
-    span = hours or (days if days else 30)
-    span = min(span, 30) if not hours else span
+    span = hours or (24 if day_view else min(days, 30) if days else 30)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     trend = []
     for back in range(span):
-        moment = now - (timedelta(hours=back) if hours else timedelta(days=back))
-        key = moment.strftime('%Y-%m-%d %H' if hours else '%Y-%m-%d')
+        if day_view:
+            moment = midnight + timedelta(hours=23 - back)
+        else:
+            moment = now - (timedelta(hours=back) if hours else timedelta(days=back))
+        key = moment.strftime('%Y-%m-%d %H' if hourly else '%Y-%m-%d')
         group = buckets.get(key, tally())
         all_tokens = group['Input'] + group['Output'] + group['CacheRead']
-        trend.append({'Date': key, 'Label': moment.strftime('%H:00') if hours else moment.strftime('%m-%d'),
+        trend.append({'Date': key, 'Label': moment.strftime('%H:00') if hourly else moment.strftime('%m-%d'),
                       'Total': all_tokens, 'TotalText': fmt_tokens(all_tokens), 'Requests': group['Requests']})
     by_total = lambda items: sorted((view(g, n) for n, g in items), key=lambda r: -r['Total'])
-    return {'App': 'antigravity', 'Days': days, 'Hours': hours, 'TrendTitle': '每小时趋势' if hours else '每日趋势',
+    return {'App': 'antigravity', 'Days': days, 'Hours': hours, 'Hourly': hourly,
+            'TrendTitle': '今日每小时（0–24 点）' if day_view else '每小时趋势' if hours else '每日趋势',
             'Totals': view(total), 'Accounts': by_total(accounts.items()), 'Models': by_total(models.items()), 'Trend': trend,
             'Priced': priced, 'PriceSource': (source or '未找到 Google 价格表') + note,
             'Note': '来自 Antigravity Tools 记录的代理请求，按账号与模型统计。Gemini 按 Google 官方 Standard 付费价格（按请求当天适用的价格，超过 200K 的提示按长上下文价格），Claude 模型按 Anthropic 官方价格；没有公开价格的模型（如 gpt-oss）不计入，金额后带“+”。这是 API 等价金额，不是账单。'}
@@ -2511,24 +2517,278 @@ def cloud_check(request, data_root, fixture=None):
 
 
 
+# Desktop's Local Storage is a Chromium LevelDB store. Only what sharing the sidebar folders needs:
+# read the newest value of each key, and append one write batch to the current log, which LevelDB
+# replays the next time Desktop opens the store. Tables are read-only here and never rewritten.
+LDB_BLOCK = 32768
+LDB_MAGIC = 0xDB4775248B80FB57
+LS_PREFIX = b'_https://claude.ai\x00'
+SECTIONS_KEY = 'LSS-persisted.dframe-code-sections'
+_CRC_TABLE = []
+for _n in range(256):
+    for _ in range(8):
+        _n = (_n >> 1) ^ (0x82F63B78 if _n & 1 else 0)
+    _CRC_TABLE.append(_n)
+
+
+def masked_crc(data):
+    crc = 0xFFFFFFFF
+    for byte in data:
+        crc = _CRC_TABLE[(crc ^ byte) & 0xFF] ^ (crc >> 8)
+    crc ^= 0xFFFFFFFF
+    return (((crc >> 15) | (crc << 17)) + 0xA282EAD8) & 0xFFFFFFFF
+
+
+def varint(data, pos):
+    result = shift = 0
+    while True:
+        byte = data[pos]
+        pos += 1
+        result |= (byte & 0x7F) << shift
+        if byte < 0x80:
+            return result, pos
+        shift += 7
+
+
+def put_varint(number):
+    out = bytearray()
+    while number >= 0x80:
+        out.append(number & 0x7F | 0x80)
+        number >>= 7
+    out.append(number)
+    return bytes(out)
+
+
+def log_records(data):
+    """Whole records of a LevelDB log, and the offset after the last intact one."""
+    pos, pending, records, end = 0, b'', [], 0
+    while pos + 7 <= len(data):
+        left = LDB_BLOCK - pos % LDB_BLOCK
+        length, kind = int.from_bytes(data[pos + 4:pos + 6], 'little'), data[pos + 6]
+        if left < 7 or (kind == 0 and length == 0):
+            pos += left if left < 7 else 7
+            continue
+        body = data[pos + 7:pos + 7 + length]
+        if len(body) < length or masked_crc(bytes([kind]) + body) != int.from_bytes(data[pos:pos + 4], 'little'):
+            break
+        pos += 7 + length
+        if kind == 1:
+            records.append(body)
+            end = pos
+        elif kind == 2:
+            pending = body
+        elif kind == 3:
+            pending += body
+        elif kind == 4:
+            records.append(pending + body)
+            pending, end = b'', pos
+    return records, end
+
+
+def batch_entries(record):
+    seq, count, pos = int.from_bytes(record[:8], 'little'), int.from_bytes(record[8:12], 'little'), 12
+    for offset in range(count):
+        kind = record[pos]
+        size, pos = varint(record, pos + 1)
+        key, pos, value = record[pos:pos + size], pos + size, None
+        if kind == 1:
+            size, pos = varint(record, pos)
+            value, pos = record[pos:pos + size], pos + size
+        yield seq + offset, key, value
+
+
+def unsnappy(data):
+    size, pos = varint(data, 0)
+    out = bytearray()
+    while pos < len(data):
+        tag = data[pos]
+        pos += 1
+        if tag & 3 == 0:
+            length = tag >> 2
+            if length >= 60:
+                extra = length - 59
+                length, pos = int.from_bytes(data[pos:pos + extra], 'little'), pos + extra
+            out += data[pos:pos + length + 1]
+            pos += length + 1
+            continue
+        if tag & 3 == 1:
+            length, offset, pos = 4 + ((tag >> 2) & 7), ((tag >> 5) << 8) | data[pos], pos + 1
+        elif tag & 3 == 2:
+            length, offset, pos = (tag >> 2) + 1, int.from_bytes(data[pos:pos + 2], 'little'), pos + 2
+        else:
+            length, offset, pos = (tag >> 2) + 1, int.from_bytes(data[pos:pos + 4], 'little'), pos + 4
+        if not 0 < offset <= len(out):
+            raise ValueError('Local Storage 数据块损坏，未修改文件夹。')
+        for _ in range(length):
+            out.append(out[-offset])
+    if len(out) != size:
+        raise ValueError('Local Storage 数据块损坏，未修改文件夹。')
+    return bytes(out)
+
+
+def block_entries(block):
+    restarts = int.from_bytes(block[-4:], 'little')
+    end, pos, key = len(block) - 4 - 4 * restarts, 0, b''
+    while pos < end:
+        shared, pos = varint(block, pos)
+        unshared, pos = varint(block, pos)
+        size, pos = varint(block, pos)
+        key = key[:shared] + block[pos:pos + unshared]
+        pos += unshared
+        yield key, block[pos:pos + size]
+        pos += size
+
+
+def table_block(data, handle, pos=0):
+    offset, pos = varint(handle, pos)
+    size, pos = varint(handle, pos)
+    raw = data[offset:offset + size]
+    return (unsnappy(raw) if data[offset + size] == 1 else raw), pos
+
+
+def table_entries(data):
+    footer = data[-48:]
+    if len(footer) < 48 or int.from_bytes(footer[-8:], 'little') != LDB_MAGIC:
+        raise ValueError('Local Storage 表文件无法识别，未修改文件夹。')
+    _, pos = varint(footer, 0)
+    _, pos = varint(footer, pos)  # Skip the metaindex handle.
+    index, _ = table_block(data, footer, pos)
+    for _, handle in block_entries(index):
+        block, _ = table_block(data, handle)
+        for internal, value in block_entries(block):
+            tag = int.from_bytes(internal[-8:], 'little')
+            yield tag >> 8, internal[:-8], value if tag & 0xFF == 1 else None
+
+
+def edit_last_sequence(record):
+    pos, last = 0, 0
+    while pos < len(record):
+        tag, pos = varint(record, pos)
+        if tag in (2, 3, 4, 9):
+            value, pos = varint(record, pos)
+            last = value if tag == 4 else last
+        elif tag in (1, 5, 6, 7):
+            for _ in range({1: 0, 5: 1, 6: 2, 7: 3}[tag]):
+                _, pos = varint(record, pos)
+            for _ in range({1: 1, 5: 1, 6: 0, 7: 2}[tag]):
+                size, pos = varint(record, pos)
+                pos += size
+        else:
+            raise ValueError('Local Storage 清单无法识别，未修改文件夹。')
+    return last
+
+
+def ldb_files(folder):
+    return [p for p in Path(folder).iterdir() if p.is_file() and not p.is_symlink() and re.fullmatch(r'\d{6,}\.(ldb|sst|log)', p.name)]
+
+
+def ldb_state(folder):
+    """Newest value of each live key and the highest sequence number in the store."""
+    folder, newest, last = Path(folder), {}, 0
+    manifest = (folder / 'CURRENT').read_text(encoding='ascii').strip() if (folder / 'CURRENT').is_file() else ''
+    if not re.fullmatch(r'MANIFEST-\d{6,}', manifest):
+        raise ValueError('Local Storage 缺少清单，未修改文件夹。')
+    for record in log_records((folder / manifest).read_bytes())[0]:
+        last = max(last, edit_last_sequence(record))
+    for path in ldb_files(folder):
+        data = path.read_bytes()
+        rows = (e for r in log_records(data)[0] for e in batch_entries(r)) if path.suffix == '.log' else table_entries(data)
+        for seq, key, value in rows:
+            last = max(last, seq)
+            if key not in newest or seq > newest[key][0]:
+                newest[key] = (seq, value)
+    return {key: value for key, (_, value) in newest.items() if value is not None}, last
+
+
+def ldb_put(folder, items, last):
+    """Append one batch to the newest log and verify LevelDB will read it back."""
+    logs = sorted((p for p in ldb_files(folder) if p.suffix == '.log'), key=lambda p: int(p.stem))
+    if not logs:
+        raise ValueError('Local Storage 缺少日志文件，未修改文件夹。')
+    path = logs[-1]
+    original = path.read_bytes()
+    if original[log_records(original)[1]:].strip(b'\x00'):
+        raise ValueError('Local Storage 日志末尾不完整，未修改文件夹。')
+    data = bytearray((last + 1).to_bytes(8, 'little') + len(items).to_bytes(4, 'little'))
+    for key, value in items:
+        data += b'\x01' + put_varint(len(key)) + key + put_varint(len(value)) + value
+    out, pos, first, data = bytearray(), len(original), True, bytes(data)
+    while True:
+        left = LDB_BLOCK - pos % LDB_BLOCK
+        if left < 7:
+            out += b'\x00' * left
+            pos += left
+            continue
+        chunk, data = data[:left - 7], data[left - 7:]
+        kind = (1 if not data else 2) if first else (4 if not data else 3)
+        out += masked_crc(bytes([kind]) + chunk).to_bytes(4, 'little') + len(chunk).to_bytes(2, 'little') + bytes([kind]) + chunk
+        pos, first = pos + 7 + len(chunk), False
+        if not data:
+            break
+    with path.open('r+b') as stream:
+        stream.seek(len(original))
+        stream.write(out)
+        stream.truncate()
+        stream.flush()
+        os.fsync(stream.fileno())
+    records = log_records(path.read_bytes())[0]
+    if not records or int.from_bytes(records[-1][:8], 'little') != last + 1:
+        with path.open('r+b') as stream:
+            stream.truncate(len(original))
+        raise ValueError('Local Storage 写入校验失败，已恢复原文件。')
+
+
+def ls_key(name):
+    return LS_PREFIX + b'\x01' + name.encode('latin-1')
+
+
+def ls_text(value):
+    return value[1:].decode('utf-16-le') if value[:1] == b'\x00' else value[1:].decode('latin-1')
+
+
+def ls_value(text):
+    try:
+        return b'\x01' + text.encode('latin-1')
+    except UnicodeEncodeError:
+        return b'\x00' + text.encode('utf-16-le')
+
+
 SESSION_FILE = re.compile(r'local_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json')
 # Index fields tied to the source account: remote bridges, scheduled tasks and its connectors.
 ACCOUNT_SCOPED = ('scheduledTaskId', 'remoteMcpServersConfig')
+# Fields every copy of a conversation shares, each group taken whole from one copy: the title and the
+# working folder from the copy edited since the last sync, the progress from the most recent copy.
+TITLE_FIELDS = ('title', 'titleSource', 'titleTurn', 'previousTitles')
+EDITED_FIELDS = (TITLE_FIELDS, ('cwd', 'originCwd', 'gitAnchorsFolderRealpath', 'requestedAdditionalFolders', 'shellFolders'))
+PROGRESS_FIELDS = ('cliSessionId', 'priorCliSessionIds', 'lastActivityAt', 'completedTurns', 'lastAssistantUuid',
+                   'lastTurnEdgeAt', 'latestUserFrameAt')
+# Sidebar folders, kept per "account/organization" scope inside Local Storage.
+SIDEBAR_KEYS = ('LSS-persisted.dframe-code-sections', 'LSS-persisted.dframe-group-scopes')
 
 
-def sync_conversations(data_root, fixture=None):
-    """Give every official account the conversation list of every other account.
+def fields(value, keys):
+    return {key: value[key] for key in keys if key in value}
 
-    Desktop keeps one index file per conversation under each account's organization folder,
-    while all transcripts live in the shared ~/.claude/projects. Copies are additive: an
-    existing index or a deletion marker is never overwritten, and each created file is journaled.
-    """
-    ensure_closed(fixture)
-    official, _, _, user = app_paths(fixture)
-    registry = official / 'claude-code-sessions'
-    transcripts = {p.stem for p in (user / '.claude/projects').glob('*/*.jsonl')}
-    organizations = {}
-    newest = {}
+
+def with_fields(value, keys, chosen):
+    value = {key: item for key, item in value.items() if key not in keys}
+    value.update(chosen)
+    return value
+
+
+def edited_fields(rows, keys, baseline):
+    """Fields of the copy changed since the last sync; before any sync, a manual, often renamed title wins."""
+    def rank(row):
+        value = row[1]
+        title = keys is TITLE_FIELDS
+        return (fields(value, keys) != baseline, title and value.get('titleSource') == 'user',
+                len(value.get('previousTitles') or []) if title else 0, row[2])
+    return fields(max(rows, key=rank)[1], keys)
+
+
+def index_copies(registry):
+    """Each account's organization folders, and every readable conversation index by file name."""
+    organizations, copies = {}, {}
     for account in sorted(registry.iterdir()) if registry.is_dir() else []:
         if account.is_symlink() or not account.is_dir():
             continue
@@ -2541,41 +2801,199 @@ def sync_conversations(data_root, fixture=None):
             organizations.setdefault(account.name, []).append((org, bool(sessions)))
             for path in sessions:
                 try:
-                    value = read(path)
+                    value, digest = read(path), sha(path)
                 except (OSError, ValueError):
                     continue
-                if value.get('sessionId') != path.stem or value.get('cliSessionId') not in transcripts:
-                    continue  # Only list conversations whose transcript exists on this computer.
-                stamp_value = value.get('lastActivityAt') or 0
-                if path.name not in newest or stamp_value > newest[path.name][0]:
-                    newest[path.name] = (stamp_value, path, value)
+                if value.get('sessionId') == path.stem:
+                    copies.setdefault(path.name, []).append((path, value, path.stat().st_mtime_ns, digest))
+    return organizations, copies
+
+
+def sidebar_candidates(stores):
+    """Per sidebar key, every scope's folders in every Local Storage copy: (written at, viewed last, layout)."""
+    found = {}
+    for folder, account in stores:
+        try:
+            values = ldb_state(folder)[0]
+            frame = json.loads(ls_text(values[ls_key('dframe-store')])) if ls_key('dframe-store') in values else {}
+            viewed = (frame.get('state') or {}).get('lastSidebarScopeKey')
+            for name in SIDEBAR_KEYS:
+                if ls_key(name) not in values:
+                    continue
+                item = json.loads(ls_text(values[ls_key(name)]))
+                for scope, layout in (item.get('value') or {}).items():
+                    own = scope == viewed or (viewed is None and bool(account) and scope.startswith(account + '/'))
+                    found.setdefault(name, []).append((item.get('timestamp') or 0, own, layout))
+        except (OSError, ValueError, IndexError, AttributeError):
+            continue  # An unreadable saved copy only means it cannot be a source.
+    return found
+
+
+def merged_layout(primary, others):
+    """The primary folders plus folders only the others have; conversations already filed stay put."""
+    layout = json.loads(json.dumps(primary))
+    if isinstance(layout.get('sections'), list):
+        filed = {m for s in layout['sections'] for m in s.get('members') or []}
+        for other in others:
+            for section in other.get('sections') or []:
+                if section.get('kind') == 'manual' and section.get('id') not in {s.get('id') for s in layout['sections']}:
+                    members = [m for m in section.get('members') or [] if m not in filed]
+                    layout['sections'].append(dict(section, members=members))
+                    filed.update(members)
+    if isinstance(layout.get('groups'), list):
+        for other in others:
+            known = {g.get('id') for g in layout['groups']}
+            layout['groups'] += [g for g in other.get('groups') or [] if g.get('id') not in known]
+            for member, group in (other.get('assignments') or {}).items():
+                layout.setdefault('assignments', {}).setdefault(member, group)
+            for group, members in (other.get('order') or {}).items():
+                layout.setdefault('order', {}).setdefault(group, members)
+    return layout
+
+
+def sync_sidebar(official, profiles, scopes, backup, baseline):
+    """Give every account scope in the live Local Storage the same sidebar folders.
+
+    The source is a scope edited after the last sync, preferring the one viewed last in the most
+    recently written copy. Before any sync, the folders of all accounts are merged so none is lost.
+    Returns the changed keys and the new baseline: each key's layout and the moment it was written.
+    """
+    live = official / 'Local Storage' / 'leveldb'
+    if not (live / 'CURRENT').is_file():
+        return [], baseline
+    stores = [(live, read(official / 'config.json').get('lastKnownAccountUuid'))]
+    for profile in sorted(profiles.iterdir()) if profiles.is_dir() else []:
+        folder = profile / 'Local Storage' / 'leveldb'
+        if not profile.name.startswith('.') and not profile.is_symlink() and (folder / 'CURRENT').is_file():
+            stores.append((folder, read(profile / 'config.json').get('lastKnownAccountUuid')))
+    values, last = ldb_state(live)
+    items, result = [], {}
+    for name, candidates in sidebar_candidates(stores).items():
+        before = baseline.get(name)
+        rank = lambda row: (row[0], row[1])
+        if before is None:
+            primary = max(candidates, key=rank)[2]
+            layout = merged_layout(primary, [row[2] for row in sorted(candidates, key=rank, reverse=True)])
+        else:
+            edited = [row for row in candidates if row[0] > before['Moment'] and row[2] != before['Layout']]
+            layout = max(edited, key=rank)[2] if edited else before['Layout']
+        current = json.loads(ls_text(values[ls_key(name)])) if ls_key(name) in values else {}
+        known = current.get('value') or {}
+        wanted = {scope: layout for scope in set(known) | scopes}
+        if wanted != known:
+            current.update({'value': wanted, 'timestamp': int(time.time() * 1000)})
+            items.append((name, ls_value(json.dumps(current, ensure_ascii=False, separators=(',', ':')))))
+        result[name] = {'Layout': layout, 'Moment': current.get('timestamp') or 0}
+    if items:
+        shutil.copytree(live, backup)
+        ldb_put(live, [(ls_key(name), value) for name, value in items], last)
+    return [name for name, _ in items], result
+
+
+def write_index(path, value, digest=None):
+    """Create an index, or replace one only while it still holds what was read."""
+    if digest is None:
+        with path.open('x', encoding='utf-8') as stream:  # 'x' never replaces a file Desktop wrote meanwhile.
+            json.dump(value, stream, ensure_ascii=False)
+            stream.flush(); os.fsync(stream.fileno())
+        return True
+    if sha(path) != digest:
+        return False
+    temporary = path.with_name(path.name + '.' + secrets.token_hex(5) + '.tmp')
+    with temporary.open('x', encoding='utf-8') as stream:
+        json.dump(value, stream, ensure_ascii=False)
+        stream.flush(); os.fsync(stream.fileno())
+    os.replace(temporary, path)
+    return True
+
+
+def sync_conversations(data_root, fixture=None):
+    """Give every official account the same conversation list, titles, folders and sidebar folders.
+
+    Desktop keeps one index file per conversation under each account's organization folder, while
+    all transcripts live in the shared ~/.claude/projects. Missing indexes are created, deletion markers
+    are respected, and differing copies take the title and folder edited last; every replaced index
+    and the Local Storage holding the sidebar folders are copied aside first, and each step is journaled.
+    """
+    ensure_closed(fixture)
+    official, _, profiles, user = app_paths(fixture)
+    transcripts = {p.stem for p in (user / '.claude/projects').glob('*/*.jsonl')}
+    organizations, copies = index_copies(official / 'claude-code-sessions')
+    state_path = Path(data_root) / 'conversation-sync-state.json'
+    state = read(state_path)
+    unified, updates = {}, []
+    for name, rows in copies.items():
+        sources = [row for row in rows if row[1].get('cliSessionId') in transcripts]
+        if not sources:
+            continue  # Only list conversations whose transcript exists on this computer.
+        merged = dict(max(sources, key=lambda row: row[1].get('lastActivityAt') or 0)[1])
+        baseline = (state.get('Conversations') or {}).get(name) or [None] * len(EDITED_FIELDS)
+        for keys, before in zip(EDITED_FIELDS, baseline):
+            merged = with_fields(merged, keys, edited_fields(rows, keys, before))
+        unified[name] = merged
+        for path, value, _, digest in rows:
+            target = value
+            for keys in EDITED_FIELDS + (PROGRESS_FIELDS,):
+                target = with_fields(target, keys, fields(merged, keys))
+            if target != value:
+                updates.append((path, target, digest))
     plan = []
     for account, orgs in organizations.items():
         # Desktop shows the organization that already holds this account's conversations.
         targets = [org for org, used in orgs if used] or [org for org, _ in orgs]
         for org in targets:
-            for name, (_, source, value) in newest.items():
+            for name, value in unified.items():
                 raw = SESSION_FILE.fullmatch(name).group(1)
                 if (org / name).exists() or (org / f'deleted_{raw}').exists():
                     continue
                 copy = {key: item for key, item in value.items() if key not in ACCOUNT_SCOPED}
                 if 'bridgeSessionIds' in copy:
                     copy['bridgeSessionIds'] = []
-                plan.append((org / name, source, copy))
-    if not plan:
-        return {'Created': 0, 'Message': '各账号的对话列表已一致。'}
-    journal = Path(data_root) / 'conversation-sync' / (stamp() + '.json')
-    entries = [{'Path': str(target), 'Source': str(source)} for target, source, _ in plan]
-    atomic_json(journal, {'Status': 'applying', 'Created': entries})
-    for entry, (target, _, value) in zip(entries, plan):
-        with target.open('x', encoding='utf-8') as stream:  # 'x' never replaces a file Desktop wrote meanwhile.
-            json.dump(value, stream, ensure_ascii=False)
-            stream.flush(); os.fsync(stream.fileno())
+                plan.append((org / name, copy))
+    moment = stamp()
+    journal = Path(data_root) / 'conversation-sync' / (moment + '.json')
+    originals = Path(data_root) / 'conversation-sync-originals' / moment
+    created = [{'Path': str(target)} for target, _ in plan]
+    updated = [{'Path': str(path), 'Backup': str(originals / path.relative_to(official))} for path, _, _ in updates]
+    record = {'Status': 'applying', 'Created': created, 'Updated': updated}
+    if plan or updates:
+        atomic_json(journal, record)
+    for entry, (target, value) in zip(created, plan):
+        write_index(target, value)
         entry['Sha256'] = sha(target)
-    atomic_json(journal, {'Status': 'committed', 'Created': entries})
-    accounts = len({Path(e['Path']).parent.parent.name for e in entries})
-    return {'Created': len(entries), 'Journal': str(journal),
-            'Message': f'已把 {len(entries)} 条对话同步到 {accounts} 个账号的列表。'}
+    for entry, (path, value, digest) in zip(updated, updates):
+        Path(entry['Backup']).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, entry['Backup'])
+        entry['Skipped'] = not write_index(path, value, digest)
+        entry['Sha256'] = sha(path)
+    record['Updated'] = [entry for entry in updated if not entry['Skipped']]
+    scopes = {f'{account}/{org.name}' for account, orgs in organizations.items() for org, used in orgs if used}
+    sidebar = state.get('Sidebar') or {}
+    try:
+        folders, sidebar = sync_sidebar(official, profiles, scopes, originals / 'Local Storage', sidebar)
+        if folders:
+            record['Sidebar'] = {'Keys': folders, 'Backup': str(originals / 'Local Storage')}
+    except (OSError, ValueError, IndexError) as error:
+        folders, record['SidebarError'] = [], str(error)
+    if plan or updates or folders or 'SidebarError' in record:
+        record['Status'] = 'committed'
+        atomic_json(journal, record)
+    atomic_json(state_path, {'Conversations': {name: [fields(value, keys) for keys in EDITED_FIELDS] for name, value in unified.items()},
+                             'Sidebar': sidebar})
+    parts = []
+    if created:
+        parts.append(f'补齐 {len(created)} 条对话到 {len({Path(e["Path"]).parent.parent.name for e in created})} 个账号的列表')
+    if record['Updated']:
+        parts.append(f'统一了 {len(record["Updated"])} 个对话条目的标题、目录或进度')
+    if folders:
+        parts.append('统一了各账号的侧栏文件夹')
+    message = ('已' + '，'.join(parts) + '。') if parts else '各账号的对话列表已一致。'
+    if 'SidebarError' in record:
+        message += f' 侧栏文件夹未同步：{record["SidebarError"]}'
+    result = {'Created': len(created), 'Updated': len(record['Updated']), 'Folders': bool(folders), 'Message': message}
+    if plan or updates or folders or 'SidebarError' in record:
+        result['Journal'] = str(journal)
+    return result
 
 
 def get_provider(identifier, db=None, data_root=None, fixture=None):
@@ -3053,7 +3471,7 @@ def execute(request, data_root, fixture=None, db=None):
             # Claude is still closed here, so Desktop cannot rewrite a list while it is extended.
             try:
                 synced = sync_conversations(data_root, fixture)
-                if synced['Created']:
+                if synced.get('Journal'):
                     result['Message'] += ' ' + synced['Message']
             except Exception as error:
                 result['Message'] += f' 对话列表未同步：{error}'
